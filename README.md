@@ -1,18 +1,56 @@
-# Perfect Dark - Carrington Evolved
+<p align="center">
+  <img src="images/Carrington_Evolved_Logo.png" width="64%"
+       alt="logo by redvox57"></p>
 
 Work-In-Progress mod for Perfect Dark's PC port by fgsfds. Focus on physics interactions such as ragdolls and general improvements to the port.
 This will be updated on release.
 
+## Status
+
+This fork provides updates to the main PC port for general stability and new features such as:
+
+* Dynamic ragdoll physics with reactions (Toggle);
+* Dismemberment (Toggle);
+* New collision system for the player (experimental) and ragdolls;
+* Restored Dolby Surround and added 5.1 support;
+* Proper audio panning support;
+* Major improvements related to high framerates (up to 240FPS tested):
+  * Interpolation improvements (doors, weapon animations, camera);
+  * Turret accuracy and fire rate (laptop gun, helicopter, interceptor, stationary turrets, drone);
+  * Visual and particle effect duration;
+  * Slow motion;
+  * NPC footstep spam;
+  * General NPC timings;
+  * Off-screen NPC timing;
+  * Object physics;
+  * WAR! Maian friendly fire;
+  * Scripted walk sections;
+  * Explosion lasting damage;
+  * Menu text;
+* Fixed guards detecting bodies behind them (Air Base);
+* Fixed somersault animation jitter;
+* Fixed guards waking up when shot during a knockout animation;
+* Restored single player effects in Co-Op (stars, rain, flying cars, light flares, etc.);
+* Shiny texture alpha fix (thanks murkantor);
+* Viewmodels properly block lights (thanks joshuarwood);
+* Decal clamping on corners;
+
+**The following platforms are officially supported and tested:**
+* Windows
+* Linux
+
+** More tests pending
+
+## Demo
+| Pure Ragdolls | Animation Blending |
+| --- | --- |
+| [![Pure ragdolls example](https://img.youtube.com/vi/4reRyDyE9c4/0.jpg)](https://youtu.be/4reRyDyE9c4) | [![Animation Blending example](https://img.youtube.com/vi/J5uhK9KV-CI/hqdefault.jpg)](https://youtu.be/J5uhK9KV-CI) |
+| [Watch on YouTube](https://youtu.be/4reRyDyE9c4) | [Watch on YouTube](https://youtu.be/J5uhK9KV-CI) |
+
 ## Credits
 
-* the original [decompilation project](https://github.com/n64decomp/perfect_dark) authors;
-* Ryan Dwyer for the above, additional help, and `pd-extract`;
-* doomhack for the only other publicly available [PD porting effort](https://github.com/doomhack/perfect_dark) I could find;
-* [sm64-port](https://github.com/sm64-port/sm64-port) authors for the audio mixer and some other changes;
-* [Ship of Harkinian team](https://github.com/Kenix3/libultraship/tree/main/src/fast), Emill and MaikelChan for the libultraship version of fast3d that this port uses;
-* lieff for [minimp3](https://github.com/lieff/minimp3);
-* Mouse Injector and 1964GEPD authors for some of the 60FPS- and mouselook-related fixes;
-* Raf for the 64-bit port;
-* NicNamSam for the icon;
-* everyone who has submitted pull requests and issues to this repository and tested the port;
-* probably more I'm forgetting.
+* The original [PC port](https://github.com/perfect-dark-pc-port/perfect_dark) authors;
+* Jorrit Rouwe for creating the [Jolt Physics library](https://github.com/jrouwe/joltphysics) used in this project;
+* murkantor for the [shiny surface alpha fix](https://github.com/murkantor/perfect_dark_netplay/blob/be4671764bbd97fb698c41852edeec2b4710ead8/docs/PORT_SHINY_ALPHA.md#L4)
+* Graslu00 for extensive testing, bug reporting and ideas;
+* Redvox57 for feedback and logo artwork.
