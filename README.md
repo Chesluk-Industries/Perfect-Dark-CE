@@ -47,6 +47,12 @@ This fork provides updates to the main PC port for general stability and new fea
 | [![Pure ragdolls example](https://img.youtube.com/vi/4reRyDyE9c4/0.jpg)](https://youtu.be/4reRyDyE9c4) | [![Animation Blending example](https://img.youtube.com/vi/J5uhK9KV-CI/hqdefault.jpg)](https://youtu.be/J5uhK9KV-CI) |
 | [Watch on YouTube](https://youtu.be/4reRyDyE9c4) | [Watch on YouTube](https://youtu.be/J5uhK9KV-CI) |
 
+## Note
+
+This fork is made with AI coding, specifically Claude Opus 5.5, and Fable 5.1 for clean-up. All the changes were carefully tested and tweaked by real, dedicated players to ensure that everything is working as intended, without breaking any of the original code. The new code is not going to be the cleanest there is, but I hope that at least the port fixes are possible to be adapted and used for the main branch if needed.
+
+Generative images, textures or other assets will ***never*** be present in this fork. All the text will always be written by a person. AI is only used as a tool to code things that would've taken months to years of research to pull off, possibly preventing things like this ever existing otherwise.
+
 ## Credits
 
 * The original [PC port](https://github.com/perfect-dark-pc-port/perfect_dark) authors;
