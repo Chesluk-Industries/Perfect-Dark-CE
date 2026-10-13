@@ -725,8 +725,16 @@ s32 inputInit(void)
 	}
 
 	// try to load controller db from an external file in the save folder
-	if (fsFileSize("$S/" CONTROLLERDB_FNAME)) {
-		const char *dbpath = fsFullPath("$S/" CONTROLLERDB_FNAME);
+	// MOD: controller db - or next to the executable (where the builds ship it;
+	// on Linux and macOS the save folder is usually elsewhere)
+	const char *dbname = NULL;
+	if (fsFileSize("$S/" CONTROLLERDB_FNAME) > 0) {
+		dbname = "$S/" CONTROLLERDB_FNAME;
+	} else if (fsFileSize("$E/" CONTROLLERDB_FNAME) > 0) {
+		dbname = "$E/" CONTROLLERDB_FNAME;
+	}
+	if (dbname) {
+		const char *dbpath = fsFullPath(dbname);
 		const s32 dbcount = SDL_GameControllerAddMappingsFromFile(dbpath);
 		if (dbcount >= 0) {
 			sysLogPrintf(LOG_NOTE, "input: added %d controller mappings from %s", dbcount, dbpath);

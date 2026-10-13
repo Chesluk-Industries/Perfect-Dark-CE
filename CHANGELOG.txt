@@ -1,4 +1,13 @@
 Perfect Dark PC port - ragdoll physics build
+Changes since 1.0
+=================
+
+CONTROLLERS
+  - The builds now include gamecontrollerdb.txt (the community controller
+    list, github.com/mdqinc/SDL_GameControllerDB), so more controllers work
+    out of the box. The game reads it from the save folder or, if it isn't
+    there, from next to the executable.
+
 Changes since the 2026-10-10 build
 ==================================
 

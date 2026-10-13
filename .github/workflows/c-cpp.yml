@@ -12,6 +12,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # MOD: controller db - the community controller mappings shipped with each
+  # build (gamecontrollerdb.txt), pinned to a commit of SDL_GameControllerDB
+  GAMECONTROLLERDB_COMMIT: c1d5289a1f713b30a2c121e9fe6529d39360be0f
+
 jobs:
   build-i686-windows:
     runs-on: windows-latest
@@ -53,6 +58,9 @@ jobs:
           mkdir -p symbols
           cp bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe symbols/
           strip --strip-debug bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -94,6 +102,9 @@ jobs:
           mkdir -p symbols
           cp bin/pd.i686 bin/pd.pal.i686 bin/pd.jpn.i686 symbols/
           strip --strip-all bin/pd.i686 bin/pd.pal.i686 bin/pd.jpn.i686
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -147,6 +158,9 @@ jobs:
           mkdir -p symbols
           cp bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe symbols/
           strip --strip-debug bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -188,6 +202,9 @@ jobs:
           mkdir -p symbols
           cp bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64 symbols/
           strip --strip-all bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -235,6 +252,9 @@ jobs:
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
           strip -S bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -276,6 +296,9 @@ jobs:
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
           strip -S bin/pd.arm64 bin/pd.pal.arm64 bin/pd.jpn.arm64
+      - name: Add gamecontrollerdb.txt
+        shell: bash
+        run: curl -sSfL --retry 3 -o bin/gamecontrollerdb.txt "https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/${GAMECONTROLLERDB_COMMIT}/gamecontrollerdb.txt"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
