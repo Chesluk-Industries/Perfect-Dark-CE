@@ -2,7 +2,9 @@ name: C/C++ CI
 
 # MOD: ragdoll physics build - Jolt Physics is downloaded by CMake (git) when
 # there's no local copy; the ragdoll sound (port/data) and the guides go
-# with each build. No Switch or flatpak builds.
+# with each build. No Switch or flatpak builds. The executables are shipped
+# stripped; the unstripped ones (for reading crash logs with addr2line) are
+# a separate "-symbols" download (Windows and Linux).
 on:
   push:
   pull_request:
@@ -46,11 +48,20 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          mkdir -p symbols
+          cp bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe symbols/
+          strip --strip-all bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pd-i686-windows
           path: bin/
+          retention-days: 0
+      - name: Upload symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: pd-i686-windows-symbols
+          path: symbols/
           retention-days: 0
 
   build-i686-linux:
@@ -78,11 +89,20 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          mkdir -p symbols
+          cp bin/pd.i686 bin/pd.pal.i686 bin/pd.jpn.i686 symbols/
+          strip --strip-all bin/pd.i686 bin/pd.pal.i686 bin/pd.jpn.i686
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pd-i686-linux
           path: bin/
+          retention-days: 0
+      - name: Upload symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: pd-i686-linux-symbols
+          path: symbols/
           retention-days: 0
 
   build-x86_64-windows:
@@ -122,11 +142,20 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          mkdir -p symbols
+          cp bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe symbols/
+          strip --strip-all bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pd-x86_64-windows
           path: bin/
+          retention-days: 0
+      - name: Upload symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: pd-x86_64-windows-symbols
+          path: symbols/
           retention-days: 0
 
   build-x86_64-linux:
@@ -154,11 +183,20 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          mkdir -p symbols
+          cp bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64 symbols/
+          strip --strip-all bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pd-x86_64-linux
           path: bin/
+          retention-days: 0
+      - name: Upload symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: pd-x86_64-linux-symbols
+          path: symbols/
           retention-days: 0
 
   build-x86_64-osx:
@@ -194,6 +232,7 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          strip -S bin/pd.x86_64 bin/pd.pal.x86_64 bin/pd.jpn.x86_64
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -234,6 +273,7 @@ jobs:
           touch bin/data/put_your_rom_here.txt
           cp -r port/data/. bin/data/
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
+          strip -S bin/pd.arm64 bin/pd.pal.arm64 bin/pd.jpn.arm64
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -264,6 +304,10 @@ jobs:
           tar cJf ../ci-release/pd-arm64-osx.tar.xz pd-arm64-osx
           zip -r ../ci-release/pd-i686-windows.zip pd-i686-windows
           zip -r ../ci-release/pd-x86_64-windows.zip pd-x86_64-windows
+          tar czf ../ci-release/pd-i686-linux-symbols.tar.gz pd-i686-linux-symbols
+          tar czf ../ci-release/pd-x86_64-linux-symbols.tar.gz pd-x86_64-linux-symbols
+          zip -r ../ci-release/pd-i686-windows-symbols.zip pd-i686-windows-symbols
+          zip -r ../ci-release/pd-x86_64-windows-symbols.zip pd-x86_64-windows-symbols
           popd
           git tag --force ci-dev-build ${{ github.sha }}
           git push --force origin ci-dev-build
