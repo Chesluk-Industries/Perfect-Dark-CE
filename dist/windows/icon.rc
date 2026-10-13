@@ -1,1 +1,28 @@
 id ICON icon.ico
+
+// MOD: version info - version information: an executable without it
+// (and stripped) is more often flagged by antivirus heuristics as suspicious
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Perfect Dark PC port"
+      VALUE "FileVersion", "1.0.0.0"
+      VALUE "InternalName", "pd"
+      VALUE "LegalCopyright", "MIT License"
+      VALUE "OriginalFilename", "pd.exe"
+      VALUE "ProductName", "Perfect Dark PC port"
+      VALUE "ProductVersion", "1.0.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

@@ -3,8 +3,10 @@ name: C/C++ CI
 # MOD: ragdoll physics build - Jolt Physics is downloaded by CMake (git) when
 # there's no local copy; the ragdoll sound (port/data) and the guides go
 # with each build. No Switch or flatpak builds. The executables are shipped
-# stripped; the unstripped ones (for reading crash logs with addr2line) are
-# a separate "-symbols" download (Windows and Linux).
+# stripped of their debug info (on Windows the symbol table stays: fully
+# stripped executables were flagged by antivirus heuristics); the unstripped
+# ones (for reading crash logs with addr2line) are a separate "-symbols"
+# download (Windows and Linux).
 on:
   push:
   pull_request:
@@ -50,7 +52,7 @@ jobs:
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
           mkdir -p symbols
           cp bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe symbols/
-          strip --strip-all bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe
+          strip --strip-debug bin/pd.i686.exe bin/pd.pal.i686.exe bin/pd.jpn.i686.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -144,7 +146,7 @@ jobs:
           cp PLAYER_GUIDE.txt CHANGELOG.txt bin/
           mkdir -p symbols
           cp bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe symbols/
-          strip --strip-all bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe
+          strip --strip-debug bin/pd.x86_64.exe bin/pd.pal.x86_64.exe bin/pd.jpn.x86_64.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
