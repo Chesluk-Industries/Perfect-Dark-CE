@@ -12,6 +12,8 @@ This fork provides updates to the main PC port for general stability and new fea
 * Dynamic ragdoll physics with reactions (Toggle);
 * Dismemberment (Toggle);
 * New collision system for the player (experimental) and ragdolls;
+* Guards are alerted by and investigate dead bodies (Toggle);
+* Immersive first person death camera (Toggle)
 * Restored Dolby Surround and added 5.1 support;
 * Proper audio panning support;
 * Major improvements related to high framerates (up to 240FPS tested):
@@ -34,12 +36,12 @@ This fork provides updates to the main PC port for general stability and new fea
 * Shiny texture alpha fix (thanks murkantor);
 * Viewmodels properly block lights (thanks joshuarwood);
 * Decal clamping on corners;
+* Probably more stuff I've forgotten;
 
 **The following platforms are officially supported and tested:**
-* Windows
-* Linux
-
-** More tests pending
+* Windows 32-bit, 64-bit
+* Linux 32-bit, 64-bit
+macOS should work as well, but it is currently untested.
 
 ## Demo
 | Pure Ragdolls | Animation Blending |
@@ -57,6 +59,6 @@ Generative images, textures or other assets will ***never*** be present in this 
 
 * The original [PC port](https://github.com/perfect-dark-pc-port/perfect_dark) authors;
 * Jorrit Rouwe for creating the [Jolt Physics library](https://github.com/jrouwe/joltphysics) used in this project;
-* murkantor for the [shiny surface alpha fix](https://github.com/murkantor/perfect_dark_netplay/blob/be4671764bbd97fb698c41852edeec2b4710ead8/docs/PORT_SHINY_ALPHA.md#L4)
+* murkantor for the [shiny surface alpha fix](https://github.com/murkantor/perfect_dark_netplay/blob/be4671764bbd97fb698c41852edeec2b4710ead8/docs/PORT_SHINY_ALPHA.md#L4);
 * Graslu00 for extensive testing, bug reporting and ideas;
 * Redvox57 for feedback and logo artwork.
