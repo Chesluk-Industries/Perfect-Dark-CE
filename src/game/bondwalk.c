@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifdef PD_CLIPCHECK
+#include "clipcheck.h" // MOD: clipping checks
+#endif
 #include "game/bondmove.h"
 #include "game/bondwalk.h"
 #include "game/cheats.h"
@@ -201,6 +204,13 @@ s32 bwalkTryMoveUpwards(f32 amount)
 	f32 ymin;
 	f32 radius;
 
+#ifdef PD_CLIPCHECK
+	// MOD: clipping checks - drawn ceilings stop the head
+	if (clipcheckPlayerCeilingBlocks(amount)) {
+		return CDRESULT_COLLISION;
+	}
+#endif
+
 	if (g_Vars.currentplayer->floorflags & GEOFLAG_SLOPE) {
 		g_Vars.enableslopes = false;
 	} else {
@@ -212,6 +222,9 @@ s32 bwalkTryMoveUpwards(f32 amount)
 	newpos.z = g_Vars.currentplayer->prop->pos.z;
 
 	types = g_Vars.bondcollisions ? CDTYPE_ALL : CDTYPE_BG;
+#ifdef PD_CLIPCHECK
+	types = clipcheckPlayerCdTypes(types); // MOD: clipping checks - generated-only collision leaves the game's level tiles out
+#endif
 
 	playerGetBbox(g_Vars.currentplayer->prop, &radius, &ymax, &ymin);
 	func0f065e74(&g_Vars.currentplayer->prop->pos, g_Vars.currentplayer->prop->rooms, &newpos, rooms);
@@ -259,6 +272,9 @@ bool bwalkCanMoveUpwards(f32 amount)
 	newpos.z = g_Vars.currentplayer->prop->pos.z;
 
 	types = g_Vars.bondcollisions ? CDTYPE_ALL : CDTYPE_BG;
+#ifdef PD_CLIPCHECK
+	types = clipcheckPlayerCdTypes(types); // MOD: clipping checks - generated-only collision leaves the game's level tiles out
+#endif
 
 	playerGetBbox(g_Vars.currentplayer->prop, &radius, &ymax, &ymin);
 	func0f065e74(&g_Vars.currentplayer->prop->pos, g_Vars.currentplayer->prop->rooms, &newpos, rooms);
@@ -274,6 +290,13 @@ bool bwalkCanMoveUpwards(f32 amount)
 	propSetPerimEnabled(g_Vars.currentplayer->prop, true);
 
 	g_Vars.enableslopes = true;
+
+#ifdef PD_CLIPCHECK
+	// MOD: clipping checks - drawn ceilings and overhangs above (standing up)
+	if (result == CDRESULT_NOCOLLISION && clipcheckPlayerCeilingBlocks(amount)) {
+		result = CDRESULT_COLLISION;
+	}
+#endif
 
 	return (result == CDRESULT_NOCOLLISION);
 }
@@ -316,6 +339,9 @@ bool bwalkCalculateNewPosition(struct coord *vel, f32 rotateamount, bool apply, 
 		dstpos.z += vel->z;
 
 		types = g_Vars.bondcollisions ? checktypes : CDTYPE_BG;
+#ifdef PD_CLIPCHECK
+		types = clipcheckPlayerCdTypes(types); // MOD: clipping checks - generated-only collision leaves the game's level tiles out
+#endif
 
 		playerGetBbox(g_Vars.currentplayer->prop, &radius, &ymax, &ymin);
 		radius += extrawidth;
@@ -363,6 +389,14 @@ bool bwalkCalculateNewPosition(struct coord *vel, f32 rotateamount, bool apply, 
 					ymax - g_Vars.currentplayer->prop->pos.y,
 					ymin - g_Vars.currentplayer->prop->pos.y);
 		}
+
+#ifdef PD_CLIPCHECK
+		// MOD: clipping checks - drawn walls without collision tiles stop the move
+		if (result == CDRESULT_NOCOLLISION
+				&& clipcheckPlayerMoveBlocked(&g_Vars.currentplayer->prop->pos, &dstpos, ymax)) {
+			result = CDRESULT_COLLISION;
+		}
+#endif
 
 		propSetPerimEnabled(g_Vars.currentplayer->prop, true);
 
@@ -842,6 +876,11 @@ void bwalkUpdateVertical(void)
 	if (ground < -30000) {
 		ground = -30000;
 	}
+
+#ifdef PD_CLIPCHECK
+	// MOD: clipping checks - drawn surfaces without collision tiles can be stood on
+	ground = clipcheckPlayerGround(ground, newinlift);
+#endif
 
 #if PIRACYCHECKS
 	if (g_Vars.currentplayer->inlift && newinlift == false) {

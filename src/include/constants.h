@@ -451,6 +451,9 @@
 #define CHEAT_AR53                   40
 #define CHEAT_RCP45                  41
 #define CHEAT_DUALWIELDALLGUNS       42
+#ifdef PD_PHYSICS
+#define CHEAT_DEADLYPUNCH            43 // MOD: Deadly Punch (port only; unlocked with Hurricane Fists)
+#endif
 
 #define CHEATFLAG_TIMED       0
 #define CHEATFLAG_ALWAYSON    1
@@ -663,6 +666,9 @@
 #define CDTYPE_OPENDOORS              0x2000
 #define CDTYPE_AJARDOORS              0x4000
 #define CDTYPE_DOORSLOCKEDTOAI        0x8000
+#ifdef PD_PHYSICS
+#define CDTYPE_BGLADDERONLY           0x10000 // MOD: clipping checks - with CDTYPE_BG: only the level's ladder tiles
+#endif
 #define CDTYPE_ALL                    0x003f
 
 #define CHECKVERTICAL_NO  0

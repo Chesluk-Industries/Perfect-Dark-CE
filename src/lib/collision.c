@@ -1161,6 +1161,21 @@ bool cd000276c8Cyl(struct geocyl *cyl, f32 x, f32 z, f32 radius, struct prop *pr
 
 s32 cdTestRampWall(struct geotilei *tile, struct coord *pos, f32 width, f32 y1, f32 y2);
 
+#ifdef PD_PHYSICS
+// MOD: clipping checks - CDTYPE_BGLADDERONLY: while set, the level's tiles
+// other than its ladders are left out (the player near a ladder with the
+// generated collision: the ladder works as in the original, the rest of the
+// game's collision can't trap him)
+#ifdef PD_CLIPCHECK
+static s32 g_CdLadderOnly = false;
+#define CD_TILEOK(geo) (!g_CdLadderOnly || ((geo)->flags & (GEOFLAG_LADDER | GEOFLAG_LADDER_PLAYERONLY)))
+#define CD_SETLADDERONLY(v) (g_CdLadderOnly = (v))
+#else
+#define CD_TILEOK(geo) 1
+#define CD_SETLADDERONLY(v)
+#endif
+#endif
+
 void cdCollectGeoForCylFromList(struct coord *pos, f32 radius, u8 *start, u8 *end, u16 geoflags,
 		bool checkvertical, f32 arg6, f32 arg7, struct prop *prop,
 		struct collision *collisions, s32 maxcollisions, s32 *numcollisions, s32 roomnum)
@@ -1172,7 +1187,11 @@ void cdCollectGeoForCylFromList(struct coord *pos, f32 radius, u8 *start, u8 *en
 		if (geo->type == GEOTYPE_TILE_I) {
 			struct geotilei *tile = (struct geotilei *) geo;
 
+#ifdef PD_PHYSICS
+			if ((geo->flags & geoflags) && CD_TILEOK(geo)
+#else
 			if ((geo->flags & geoflags)
+#endif
 					&& pos->x >= *(s16 *)(tile->xmin + (uintptr_t)tile) - radius
 					&& pos->x <= *(s16 *)(tile->xmax + (uintptr_t)tile) + radius
 					&& pos->z >= *(s16 *)(tile->zmin + (uintptr_t)tile) - radius
@@ -1202,7 +1221,11 @@ void cdCollectGeoForCylFromList(struct coord *pos, f32 radius, u8 *start, u8 *en
 			struct geotilef *tile = (struct geotilef *) geo;
 			s32 tmp = 0x40;
 
+#ifdef PD_PHYSICS
+			if ((geo->flags & geoflags) && CD_TILEOK(geo)
+#else
 			if ((geo->flags & geoflags)
+#endif
 					&& pos->x >= *(f32 *)((uintptr_t)tile + tile->xmin * 0xc + 0x10) - radius
 					&& pos->x <= *(f32 *)((uintptr_t)tile + tile->xmax * 0xc + 0x10) + radius
 					&& pos->z >= *(f32 *)((uintptr_t)tile + tile->zmin * 0xc + 0x18) - radius
@@ -1273,6 +1296,10 @@ void cdCollectGeoForCyl(struct coord *pos, f32 radius, RoomNum *rooms, u32 types
 	s16 propnums[256];
 
 	// Check BG
+#ifdef PD_PHYSICS
+	CD_SETLADDERONLY((types & CDTYPE_BGLADDERONLY) != 0); // MOD: clipping checks
+#endif
+
 	if (types & CDTYPE_BG) {
 		roomptr = rooms;
 		roomnum = rooms[0];
@@ -1294,6 +1321,10 @@ void cdCollectGeoForCyl(struct coord *pos, f32 radius, RoomNum *rooms, u32 types
 		}
 	}
 
+#ifdef PD_PHYSICS
+	CD_SETLADDERONLY(false); // MOD: clipping checks
+#endif
+
 	// Check props
 	roomGetProps(rooms, propnums, 256);
 	propnumptr = propnums;
@@ -1313,6 +1344,9 @@ void cdCollectGeoForCyl(struct coord *pos, f32 radius, RoomNum *rooms, u32 types
 	}
 
 end:
+#ifdef PD_PHYSICS
+	CD_SETLADDERONLY(false); // MOD: clipping checks
+#endif
 	collisions[numcollisions].geo = NULL;
 }
 
@@ -1532,7 +1566,11 @@ void cdCollectGeoForCylMoveFromList(u8 *start, u8 *end, struct coord *pos, f32 r
 		if (geo->type == GEOTYPE_TILE_I) {
 			struct geotilei *tile = (struct geotilei *) geo;
 
+#ifdef PD_PHYSICS
+			if ((geo->flags & geoflags) && CD_TILEOK(geo)) {
+#else
 			if (geo->flags & geoflags) {
+#endif
 				if (pos->x >= *(s16 *)(tile->xmin + (uintptr_t)tile) - radius
 						&& pos->x <= *(s16 *)(tile->xmax + (uintptr_t)tile) + radius
 						&& pos->z >= *(s16 *)(tile->zmin + (uintptr_t)tile) - radius
@@ -1557,7 +1595,11 @@ void cdCollectGeoForCylMoveFromList(u8 *start, u8 *end, struct coord *pos, f32 r
 		} else if (geo->type == GEOTYPE_TILE_F) {
 			struct geotilef *tile = (struct geotilef *) geo;
 
+#ifdef PD_PHYSICS
+			if ((geo->flags & geoflags) && CD_TILEOK(geo)
+#else
 			if ((geo->flags & geoflags)
+#endif
 					&& pos->x >= tile->vertices[tile->xmin].x - radius
 					&& pos->x <= tile->vertices[tile->xmax].x + radius
 					&& pos->z >= tile->vertices[tile->zmin].z - radius
@@ -1601,6 +1643,10 @@ void cdCollectGeoForCylMove(struct coord *pos, f32 width, RoomNum *rooms, u32 ty
 	s16 propnums[256];
 
 	// Check BG
+#ifdef PD_PHYSICS
+	CD_SETLADDERONLY((types & CDTYPE_BGLADDERONLY) != 0); // MOD: clipping checks
+#endif
+
 	if (types & CDTYPE_BG) {
 		roomptr = rooms;
 		roomnum = rooms[0];
@@ -1617,6 +1663,10 @@ void cdCollectGeoForCylMove(struct coord *pos, f32 width, RoomNum *rooms, u32 ty
 			roomnum = *roomptr;
 		}
 	}
+
+#ifdef PD_PHYSICS
+	CD_SETLADDERONLY(false); // MOD: clipping checks
+#endif
 
 	// Check props
 	roomGetProps(rooms, propnums, 256);

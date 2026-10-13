@@ -147,6 +147,18 @@ void configRegisterString(const char *key, char *var, u32 maxstr)
 static void configSetFromString(const char *key, const char *val)
 {
 	struct configentry *cfg = configFindEntry(key);
+
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - the ragdoll settings moved from [Game] to
+	// [Ragdoll]: an older pd.ini's values are still read (and saved in the
+	// new place)
+	if (!cfg && strncmp(key, "Game.Ragdoll", 12) == 0) {
+		char moved[CONFIG_MAX_SECNAME * 2 + 2];
+		snprintf(moved, sizeof(moved), "Ragdoll.%s", key + 5);
+		cfg = configFindEntry(moved);
+	}
+#endif
+
 	if (!cfg) return;
 
 	s32 tmp_s32;

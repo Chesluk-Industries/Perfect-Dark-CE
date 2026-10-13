@@ -42,6 +42,9 @@
 #include <math.h>
 #include "input.h"
 #include "video.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 
 #ifndef PLATFORM_N64
 /**
@@ -97,6 +100,15 @@ static void bgunProcessQuickDetonate(struct movedata *data, u32 c1buttons, u32 c
 static void bgunProcessInputAltButton(struct movedata *data, s8 contpad, s32 i)
 {
 	s32 buttons = joyGetButtonsOnSample(i, contpad, 0xffffffff);
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - Use is holding a body or an object, not
+	// asking for the gun's other function
+	if (ragdollIsHolding() && (buttons & BUTTON_ALTMODE) == 0) {
+		g_Vars.currentplayer->altdowntime = 0;
+		return;
+	}
+#endif
 	if (buttons & (BUTTON_ALTMODE)) {
 		if (g_Vars.currentplayer->altdowntime >= -1) {
 			if (buttons & (Z_TRIG)
@@ -1106,6 +1118,9 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 								if (g_Vars.currentplayer->usedowntime >= -1) {
 									if (joyGetButtonsPressedOnSample(i, shootpad, shootallowedbuttons & Z_TRIG)
 											&& g_Vars.currentplayer->usedowntime > -1
+#ifdef PD_PHYSICS
+											&& !ragdollIsHolding() // MOD: ragdoll physics
+#endif
 											&& bgunConsiderToggleGunFunction(g_Vars.currentplayer->usedowntime, true, false, 0) != USETIMER_CONTINUE) {
 										g_Vars.currentplayer->usedowntime = -3;
 									}
@@ -1572,6 +1587,9 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 									if (controlmode != CONTROLMODE_PC) {
 										if (joyGetButtonsPressedOnSample(i, contpad1, shootbuttons & c1allowedbuttons)
 												&& g_Vars.currentplayer->usedowntime >= 0
+#ifdef PD_PHYSICS
+												&& !ragdollIsHolding() // MOD: ragdoll physics
+#endif
 												&& bgunConsiderToggleGunFunction(g_Vars.currentplayer->usedowntime, true, false, 0) != USETIMER_CONTINUE) {
 											g_Vars.currentplayer->usedowntime = -3;
 										}

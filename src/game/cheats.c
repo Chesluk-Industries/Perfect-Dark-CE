@@ -102,8 +102,34 @@ struct cheat g_Cheats[] = {
 	{ L_MPWEAPONS_116, WEAPON_RCP45,      0,                             0,       CHEATFLAG_FIRINGRANGE                        }, // RC-P45
 #ifndef PLATFORM_N64
 	{ L_MPWEAPONS_215, 0,                 SOLOSTAGEINDEX_EXTRACTION,     DIFF_A,  CHEATFLAG_COMPLETION                         }, // Dual wield all guns
+#ifdef PD_PHYSICS
+	// MOD: Deadly Punch - unlocked the same way as Hurricane Fists (its name is in cheatNameText)
+	{ L_MPWEAPONS_075, TIME(2 m,  3 s),   SOLOSTAGEINDEX_EXTRACTION,     DIFF_A,  CHEATFLAG_TIMED | CHEATFLAG_TRANSFERPAK      }, // Deadly Punch
+#endif
 #endif
 };
+#ifdef PD_PHYSICS
+
+// MOD: Deadly Punch - port-only cheats have no text in the game's language files
+static char *cheatNameText(s32 cheat_id)
+{
+	if (cheat_id == CHEAT_DEADLYPUNCH) {
+		return "Deadly Punch\n";
+	}
+
+	return langGet(g_Cheats[cheat_id].nametextid);
+}
+
+/**
+ * MOD: Deadly Punch - the cheat's punch (the unarmed primary; the disarm
+ * stays a safe knockout).
+ */
+bool cheatIsDeadlyPunch(struct gset *gset)
+{
+	return gset != NULL && gset->weaponnum == WEAPON_UNARMED && gset->weaponfunc == FUNC_PRIMARY
+		&& cheatIsActive(CHEAT_DEADLYPUNCH);
+}
+#endif
 
 u32 cheatIsUnlocked(s32 cheat_id)
 {
@@ -416,7 +442,11 @@ MenuItemHandlerResult cheatMenuHandleBuddyCheckbox(s32 operation, struct menuite
 char *cheatGetNameIfUnlocked(struct menuitem *item)
 {
 	if (cheatIsUnlocked(item->param)) {
+#ifdef PD_PHYSICS
+		return cheatNameText(item->param);
+#else
 		return langGet(g_Cheats[item->param].nametextid);
+#endif
 	}
 
 	return langGet(L_MPWEAPONS_074); // "----------"
@@ -537,11 +567,19 @@ char *cheatGetMarquee(struct menuitem *arg0)
 			// Show cheat name
 			sprintf(g_CheatMarqueeString, "%s %s\n",
 					g_Menus[g_MpPlayerNum].curdialog->definition == &g_CheatsBuddiesMenuDialog ? langGet(L_MPWEAPONS_143) : langGet(L_MPWEAPONS_136), // "Buddy Available", "Cheat available"
+#ifdef PD_PHYSICS
+					cheatNameText(cheat_id)
+#else
 					langGet(g_Cheats[cheat_id].nametextid)
+#endif
 			);
 		} else {
 			// Locked
+#ifdef PD_PHYSICS
+			strcpy(cheatname, cheatNameText(cheat_id));
+#else
 			strcpy(cheatname, langGet(g_Cheats[cheat_id].nametextid));
+#endif
 			ptr = cheatname;
 
 			while (*ptr != '\n') {
@@ -620,11 +658,19 @@ char *cheatGetMarquee(struct menuitem *arg0)
 			// Show cheat name
 			sprintf(g_CheatMarqueeString, "%s: %s\n",
 					g_Menus[g_MpPlayerNum].curdialog->definition == &g_CheatsBuddiesMenuDialog ? langGet(L_MPWEAPONS_143) : langGet(L_MPWEAPONS_136), // "Buddy Available", "Cheat available"
+#ifdef PD_PHYSICS
+					cheatNameText(cheat_id)
+#else
 					langGet(g_Cheats[cheat_id].nametextid)
+#endif
 			);
 		} else {
 			// Locked
+#ifdef PD_PHYSICS
+			strcpy(cheatname, cheatNameText(cheat_id));
+#else
 			strcpy(cheatname, langGet(g_Cheats[cheat_id].nametextid));
+#endif
 			ptr = cheatname;
 
 			while (*ptr != '\n') {
@@ -699,11 +745,19 @@ char *cheatGetMarquee(struct menuitem *arg0)
 			// Show cheat name
 			sprintf(g_CheatMarqueeString, "%s: %s\n",
 					g_Menus[g_MpPlayerNum].curdialog->definition == &g_CheatsBuddiesMenuDialog ? langGet(L_MPWEAPONS_143) : langGet(L_MPWEAPONS_136), // "Buddy Available", "Cheat available"
+#ifdef PD_PHYSICS
+					cheatNameText(cheat_id)
+#else
 					langGet(g_Cheats[cheat_id].nametextid)
+#endif
 			);
 		} else {
 			// Locked
+#ifdef PD_PHYSICS
+			strcpy(cheatname, cheatNameText(cheat_id));
+#else
 			strcpy(cheatname, langGet(g_Cheats[cheat_id].nametextid));
+#endif
 			ptr = cheatname;
 
 			while (*ptr != '\n') {
@@ -768,11 +822,19 @@ char *cheatGetMarquee(struct menuitem *arg0)
 			// Show cheat name
 			sprintf(g_StringPointer, "%s: %s\n",
 					g_Menus[g_MpPlayerNum].curdialog->definition == &g_CheatsBuddiesMenuDialog ? langGet(L_MPWEAPONS_143) : langGet(L_MPWEAPONS_136), // "Buddy Available", "Cheat available"
+#ifdef PD_PHYSICS
+					cheatNameText(cheat_id)
+#else
 					langGet(g_Cheats[cheat_id].nametextid)
+#endif
 			);
 		} else {
 			// Locked
+#ifdef PD_PHYSICS
+			strcpy(cheatname, cheatNameText(cheat_id));
+#else
 			strcpy(cheatname, langGet(g_Cheats[cheat_id].nametextid));
+#endif
 			ptr = cheatname;
 
 			while (*ptr != '\n') {
@@ -882,7 +944,11 @@ s32 cheatGetTime(s32 cheat_id)
 #if VERSION >= VERSION_NTSC_1_0
 char *cheatGetName(s32 cheat_id)
 {
+#ifdef PD_PHYSICS
+	return cheatNameText(cheat_id);
+#else
 	return langGet(g_Cheats[cheat_id].nametextid);
+#endif
 }
 #endif
 
@@ -1414,6 +1480,16 @@ struct menuitem g_CheatsWeaponsMenuItems[] = {
 		0,
 		cheatCheckboxMenuHandler,
 	},
+#ifdef PD_PHYSICS
+	{
+		MENUITEMTYPE_CHECKBOX,
+		CHEAT_DEADLYPUNCH, // MOD: Deadly Punch
+		0,
+		(uintptr_t)&cheatGetNameIfUnlocked,
+		0,
+		cheatCheckboxMenuHandler,
+	},
+#endif
 	{
 		MENUITEMTYPE_CHECKBOX,
 		CHEAT_UNLIMITEDAMMO,

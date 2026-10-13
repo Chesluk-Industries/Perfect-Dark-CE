@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifdef PD_PHYSICS
+#include "game/cheats.h" // MOD: Deadly Punch
+#endif
 #include "game/chraction.h"
 #include "game/game_006900.h"
 #include "game/bondgun.h"
@@ -467,6 +470,13 @@ void amGetSlotDetails(s32 slot, u32 *flags, char *label)
 
 				if (prifunc) {
 					strcpy(label, langGet(prifunc->name));
+#ifdef PD_PHYSICS
+
+					// MOD: Deadly Punch - the punch goes by the cheat's name
+					if (prifunc->name == L_GUN_100 && cheatIsActive(CHEAT_DEADLYPUNCH)) {
+						strcpy(label, "Deadly Punch\n");
+					}
+#endif
 				}
 			} else {
 				if (!prifunc || FUNCISSEC()) {

@@ -1,0 +1,89 @@
+# MOD tag | category | what it is
+# The tag is the text after "MOD: " in a code comment, up to " - ", "(" or ".".
+# Categories:
+#   F  fix: the port behaves (or looks, or sounds) as the original game does
+#   N  non-vanilla: a change from the original game outside the ragdoll module
+#      (an improvement, a new option, or a bug of the original game fixed)
+#   R  ragdoll / physics: the ragdoll module, accurate collision and the
+#      gameplay built on them
+# make_release.sh uses this table to mark each file in CHANGED_FILES.txt.
+#
+# --- F: fixes (as the original) ---
+high framerates|F|game logic that ran per tick (frame) instead of per 60th of a second
+attack amount|F|high framerates: guards' bursts fire their full number of bullets
+autogun|F|high framerates: turrets and laptop guns fire 30 times a second
+bolt wobble|F|high framerates: a stuck crossbow bolt's wobble
+bounce sound|F|high framerates: thrown items' bounce sound
+button hold timers|F|high framerates: holding B (gun functions) and aim (crouch tap)
+chopper gun|F|high framerates: helicopter and interceptor guns
+chopper movement|F|high framerates: helicopter bob, thrust and drag
+cloak fade|F|high framerates: guards uncloaking in view
+credits timing|F|high framerates: the end credits' random changes
+cutscene static|F|high framerates: the cutscene static flash
+death lean|F|high framerates: the lean recovering after a hit
+door stuckage|F|high framerates: how often doors jam
+drone laser|F|high framerates: the Chicago drone's guns
+Dr Caroll's faces|F|high framerates: Dr. Caroll's face changes
+explosion shake|F|high framerates: the screen shake after explosions
+footsteps|F|high framerates: footstep sounds on almost every tick
+hovercar fall|F|high framerates: falling hovercars
+IR scanner|F|high framerates: the IR scanner's sweep
+laser beam|F|high framerates: how long a laser beam shows
+marquee speed|F|high framerates: the scrolling menu text
+momentum decay|F|high framerates: momentum after leaving a hoverbike
+per 60th|F|high framerates: menu dialog transitions
+push decay|F|high framerates: how far a pushed guard slides
+shield check fix|F|high framerates: Extraction's "Dr. Caroll is under attack!" at the start
+shield shimmer|F|high framerates: the shield shimmer
+slow motion|F|high framerates: the slow motion cheat at 240 FPS
+smooth gun|F|high framerates: the gun animates every frame, not in 60th steps
+smooth skjump|F|high framerates: Skedar leaps move every frame
+smooth speed|F|high framerates: movements by the tick's time, not in 60th steps
+smooth swirl|F|high framerates: the multiplayer intro camera
+sneeze sound|F|high framerates: the sneeze sound restarting
+sparking lights|F|high framerates: broken lights sparking
+sparks|F|high framerates: pad spark effects
+sticky projectiles|F|high framerates: mines thrown at your feet stick
+wallhit timers|F|high framerates: bullet hole and blood fade timers
+weather timing|F|high framerates: rain fades and wind
+Dolby Surround|F|stereo output in Surround sound mode is Dolby Surround encoded, as on the N64
+shiny alpha fix|F|shiny surfaces (floors, glass) in the dark (by murkantor)
+texture quirks|F|rock textures that must look solid; LOD texture loading
+tile width|F|textures loaded with the wrong tile width
+gun blocks glares|F|light glares hidden behind the gun and hands, as the N64's depth test (by joshuarwood, PR #714)
+light patches|F|lights restored in Defection, Villa and Investigation by patching the level files at start-up (by joshuarwood, PR #722)
+grated door glares|F|light glares show through grated doors (by joshuarwood, PR #735)
+menu capacity|F|menus never write past their arrays
+config capacity|F|pd.ini settings past the 300th were silently dropped
+#
+# --- N: non-vanilla (outside the ragdoll module) ---
+knockout fix|N|original game bug: a guard hit while going down stays knocked out
+roll fix|N|original game bug: the guards' roll animations swinging through wrong poses
+surround 5.1|N|real 5.1 output
+surround 5.1 rear buffers|N|real 5.1 output
+speaker volumes|N|5.1 speaker levels
+speaker test|N|5.1 speaker test
+smooth panning|N|sounds moving between speakers pan smoothly
+sound capacity|N|more sounds at once (4 x the original's channels)
+co-op effects|N|full effects in co-op and counter-op (the N64 reduced them for speed)
+split-screen glares|N|light glares, suns and lens flares in split screen, per view (option; by joshuarwood, PR #760)
+decal edge clamp|N|decals no longer hang off the edges of surfaces (option)
+Video.UnlimitedDecals|N|bullet holes, blood and scorch marks are never recycled (option)
+no limit on bullet holes|N|bullet holes, blood and scorch marks are never recycled (option)
+bigger per-frame display list and vertex buffers for|N|memory for unlimited decals
+extra memp heap|N|memory for unlimited decals and ragdoll bodies
+headroom for unlimited decals and ragdoll corpses|N|memory for unlimited decals and ragdoll bodies
+crash logs|N|crash logs with a backtrace (pd.crash-<date>.log)
+defaults|N|port default: GUI texture filtering off
+#
+# --- R: ragdoll / physics ---
+ragdoll physics|R|the ragdoll module and its hooks in the game
+ragdoll ranges|R|ragdoll settings rolled per body between a min and a max
+physics presets|R|Extended > Physics > Preset
+clipping checks|R|accurate collision (collision from the level as it's drawn)
+blood wrap|R|blood that wraps round corners
+bodies as cover|R|a held body stops bullets
+Deadly Punch|R|the Deadly Punch cheat
+death camera control|R|twitching and looking around while dead
+death camera hold|R|Manual Skip: the death screen waits for Start or Fire
+witness field of view|R|guards only notice deaths they could see (an AI change made for the body reactions)

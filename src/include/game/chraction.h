@@ -114,6 +114,9 @@ void chrTickAnim(struct chrdata *chr);
 void chrTickSurrender(struct chrdata *chr);
 void chrTickDead(struct chrdata *chr);
 void chrAlertOthersOfInjury(struct chrdata *chr, bool dying);
+#ifdef PD_PHYSICS
+bool chrCanWitness(struct chrdata *chr, struct coord *pos, RoomNum *rooms); // MOD: witness field of view
+#endif
 void chrTickDie(struct chrdata *chr);
 void chrTickDruggedComingUp(struct chrdata *chr);
 void chrTickDruggedDrop(struct chrdata *chr);

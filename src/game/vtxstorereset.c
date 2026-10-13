@@ -4,6 +4,9 @@
 #include "lib/memp.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 
 void vtxstoreReset(void)
 {
@@ -28,6 +31,17 @@ void vtxstoreReset(void)
 		} else {
 			val = g_VtxstoreTypes[i].valifsp;
 			num = g_VtxstoreTypes[i].numifsp;
+#ifdef PD_PHYSICS
+
+			// MOD: ragdoll physics - many more corpses are kept, and each shot
+			// one holds a copy of its vertices (bullet damage). The original
+			// budget ran out after a handful of bodies and then faded corpses
+			// as soon as the player looked away. See RD_MAINMEMA_EXTRA.
+			if (g_RagdollsEnabled && (i == VTXSTORETYPE_CHRVTX || i == VTXSTORETYPE_CHRCOL)) {
+				val *= 12;
+				num *= 8;
+			}
+#endif
 		}
 
 		if (num > 0) {

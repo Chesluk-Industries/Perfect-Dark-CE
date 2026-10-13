@@ -74,6 +74,9 @@
 #include "video.h"
 #include "input.h"
 #include "platform.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 #endif
 
 s32 g_DefaultWeapons[2];
@@ -512,6 +515,12 @@ void playerStartNewLife(void)
 			prop = prop->next;
 		}
 	}
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - co-op respawn: the body this player left behind
+	// (it's this same chr) stops being a ragdoll
+	ragdollOnPlayerNewLife();
+#endif
 
 	splatResetChr(g_Vars.currentplayer->prop->chr);
 	playerLoadDefaults();
@@ -3853,7 +3862,21 @@ void playerTick(bool arg0)
 		struct chrdata *chr;
 		s32 i;
 
+#ifdef PD_PHYSICS
+		struct coord rdcampos, rdcamup, rdcamlook, rdcamfrom;
+
+		// MOD: ragdoll physics - when dead, the player keeps a body that
+		// becomes a ragdoll, and the camera rides in its head (Immersive
+		// Death Camera). Otherwise the solo body is removed as usual.
+		if (g_Vars.currentplayer->isdead && ragdollWantPlayerBody()) {
+			playerTickChrBody();
+			ragdollPlayerBodyTick();
+		} else {
+			playerRemoveChrBody();
+		}
+#else
 		playerRemoveChrBody();
+#endif
 
 		if (g_PlayersWithControl[g_Vars.currentplayernum]) {
 			bmoveTick(1, 1, arg0, 0);
@@ -3872,6 +3895,11 @@ void playerTick(bool arg0)
 		spf4.y = b + spf4.y;
 		spf4.z = c + spf4.z;
 
+#ifdef PD_PHYSICS
+		if (g_Vars.currentplayer->isdead && ragdollGetDeathCam(&rdcampos, &rdcamup, &rdcamlook, &rdcamfrom)) {
+			player0f0c1840(&rdcampos, &rdcamup, &rdcamlook, &rdcamfrom, g_Vars.currentplayer->prop->rooms);
+		} else
+#endif
 		player0f0c1840(&spf4,
 				&g_Vars.currentplayer->bond2.unk28,
 				&g_Vars.currentplayer->bond2.unk1c,
@@ -4775,7 +4803,14 @@ Gfx *playerRenderHud(Gfx *gdl)
 		}
 
 		if (modelGetCurAnimFrame(&g_Vars.currentplayer->model) >= modelGetAnimEndFrame(&g_Vars.currentplayer->model)
+#ifdef PD_PHYSICS
+				&& g_Vars.currentplayer->redbloodfinished
+				// MOD: ragdoll physics - the death camera can wait for Start/Fire
+				&& (g_Vars.currentplayer->deathanimfinished || !ragdollHoldDeathCam())
+				) {
+#else
 				&& g_Vars.currentplayer->redbloodfinished) {
+#endif
 			if (g_Vars.currentplayer->deathanimfinished == false) {
 				g_Vars.currentplayer->deathanimfinished = true;
 				playerAdjustFade(60, 0, 0, 0, 1);
@@ -5622,6 +5657,15 @@ s32 playerTickThirdPerson(struct prop *prop)
 		return tickop2;
 	}
 
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - the dead player's ragdoll (death camera) is
+	// ticked and drawn like any chr, so the player sees their own body
+	if (player->haschrbody && player->isdead && chr->model && ragdollIsChrRagdolled(chr)) {
+		return chrTick(prop);
+	}
+
+#endif
 	if (PLAYERCOUNT() == 1) {
 		chrUpdateCloak(chr);
 	}

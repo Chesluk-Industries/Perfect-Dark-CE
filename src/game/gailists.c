@@ -4,6 +4,9 @@
 #include "stagesetup.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 
 /**
  * gailists - Global AI Lists
@@ -6148,5 +6151,8 @@ struct ailist g_GlobalAilists[] = {
 	{ func0029_aibot_init,                GAILIST_AIBOT_INIT             },
 	{ func002a_aibot_main,                GAILIST_AIBOT_MAIN             },
 	{ func002b_avoid,                     GAILIST_AVOID                  },
+#ifdef PD_PHYSICS
+	{ g_RdExamineBodyAilist,              GAILIST_RD_EXAMINE_BODY        }, // MOD: ragdoll physics - guards look bodies over
+#endif
 	{ NULL },
 };

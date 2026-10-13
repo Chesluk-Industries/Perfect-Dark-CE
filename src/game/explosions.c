@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 #ifndef PLATFORM_N64
 #include "game/lv.h" // MOD: high framerates - LV_STEPS240
 #endif
@@ -1039,6 +1042,16 @@ void explosionInflictDamage(struct prop *expprop)
 					}
 
 					chrDamageByExplosion(chr, minfrac, &spa0, ownerprop, &expprop->pos);
+#ifdef PD_PHYSICS
+
+					// MOD: ragdoll physics - the initial blast throws bodies (including ones it just killed)
+					if (prop->type == PROPTYPE_CHR && isfirstframe) {
+						ragdollOnExplosion(chr, &expprop->pos, damageradius, type->damage);
+					} else if (prop->type == PROPTYPE_PLAYER && isfirstframe) {
+						// ... and the dead player's body (death camera)
+						ragdollOnPlayerExplosion(prop, &expprop->pos, damageradius, type->damage);
+					}
+#endif
 
 					if (prop->type == PROPTYPE_CHR && !isfirstframe) {
 						chrDisfigure(chr, &expprop->pos, damageradius);

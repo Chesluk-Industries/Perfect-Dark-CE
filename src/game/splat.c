@@ -503,6 +503,17 @@ void splat0f14986c(struct splatdata *splat)
 			width, height, minalpha, maxalpha,
 			rngRandom() % 360, (u16)splat->timermax, splat->timerspeed, translucent);
 
+#ifdef PD_PHYSICS
+	// MOD: blood wrap - on the level, the splat carries on round corners (port/src/bloodwrap.c)
+	if (splat->objprop == NULL) {
+		extern void bloodWrapSplat(struct coord *pos, struct coord *normal, f32 width, f32 height, s16 texnum, RoomNum room,
+				struct prop *chrprop, struct chrdata *chr, u8 minalpha, u8 maxalpha, u32 timermax, u32 timerspeed, bool xlu);
+
+		bloodWrapSplat(&splat->relpos, &splat->unk18, width, height, texnum, splat->room,
+				splat->chrprop, splat->chr, minalpha, maxalpha, (u16)splat->timermax, splat->timerspeed, translucent);
+	}
+
+#endif
 	if (sp88 || sp84) {
 		smokerooms[0] = splat->room;
 		smokerooms[1] = -1;

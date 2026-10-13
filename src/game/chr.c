@@ -1,6 +1,9 @@
 #include <ultra64.h>
 #include "lib/sched.h"
 #include "constants.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 #include "game/bondmove.h"
 #include "game/cheats.h"
 #include "game/chraction.h"
@@ -1414,6 +1417,10 @@ void chrRemove(struct prop *prop, bool free)
 	struct defaultobj *eyespyobj = NULL;
 	struct prop *child;
 	u32 stack[2];
+#ifdef PD_PHYSICS
+
+	ragdollOnChrRemoved(chr); // MOD: ragdoll physics
+#endif
 
 	bgunFreeFireslotWrapper(chr->fireslots[0]);
 	bgunFreeFireslotWrapper(chr->fireslots[1]);
@@ -1964,6 +1971,13 @@ void chr0f0220ec(struct chrdata *chr, s32 lvupdate240, bool arg2)
 {
 	struct model *model = chr->model;
 
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - no animation (or root motion) for ragdolls
+	if (ragdollIsChrRagdolled(chr)) {
+		return;
+	}
+
+#endif
 	if (g_Vars.tickmode == TICKMODE_CUTSCENE) {
 		if (chr->prop->type == PROPTYPE_PLAYER) {
 			chr->hidden &= ~CHRHFLAG_00000800;
@@ -2501,7 +2515,15 @@ s32 chrTick(struct prop *prop)
 					}
 				}
 			} else {
+#ifdef PD_PHYSICS
+				// MOD: ragdoll physics - a dead player is targeted at their body's head
+				struct coord rdsaved;
+				struct prop *rdtarget = ragdollAimAtDeadPlayerBegin(chr, &rdsaved);
+#endif
 				chraTick(chr);
+#ifdef PD_PHYSICS
+				ragdollAimAtDeadPlayerEnd(rdtarget, &rdsaved);
+#endif
 
 				if (chr->model == NULL) {
 					return TICKOP_FREE;
@@ -2700,13 +2722,27 @@ s32 chrTick(struct prop *prop)
 		chrUpdateAimProperties(chr);
 	}
 
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - cut pieces can be in view when the pelvis isn't
+	if (!needsupdate && (chr->actiontype == ACT_DEAD || chr->actiontype == ACT_DIE || prop->type == PROPTYPE_PLAYER)) {
+		needsupdate = ragdollIsAnyPieceOnScreen(chr, modelGetEffectiveScale(model));
+	}
+
+#endif
 	if (prop->pos.y < -65536) {
 		needsupdate = false;
 	}
 
 #if VERSION >= VERSION_NTSC_1_0
 	if (!g_Vars.normmplayerisrunning && needsupdate) {
+#ifdef PD_PHYSICS
+		if (ragdollIsChrRagdolled(chr)) {
+			// MOD: ragdoll physics - ragdoll corpses have their own limits
+			// (pd.ini Ragdoll.RagdollMaxBodies), so skip the N64 corpse cap
+		} else if (chr->actiontype == ACT_DEAD
+#else
 		if (chr->actiontype == ACT_DEAD
+#endif
 				|| (chr->actiontype == ACT_DRUGGEDKO && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0)) {
 			var8009cdac++;
 
@@ -2719,7 +2755,11 @@ s32 chrTick(struct prop *prop)
 			var8009cdb0++;
 		}
 
+#ifdef PD_PHYSICS
+		if (var8009cdb0 + var8009cdac > 30 && !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics
+#else
 		if (var8009cdb0 + var8009cdac > 30) {
+#endif
 			needsupdate = false;
 		}
 	}
@@ -2960,7 +3000,18 @@ s32 chrTick(struct prop *prop)
 			chr->hidden &= ~CHRHFLAG_DROPPINGITEM;
 		}
 
+#ifdef PD_PHYSICS
+		{
+			// MOD: ragdoll physics - a dead player is shot at their body's head
+			struct coord rdsaved;
+			struct prop *rdtarget = ragdollAimAtDeadPlayerBegin(chr, &rdsaved);
+
+			func0f041a74(chr);
+			ragdollAimAtDeadPlayerEnd(rdtarget, &rdsaved);
+		}
+#else
 		func0f041a74(chr);
+#endif
 	}
 
 	return TICKOP_NONE;
@@ -3363,6 +3414,9 @@ void chrGetBloodColour(s16 bodynum, u8 *colour1, u32 *colour2)
 	case BODY_ELVIS1:
 	case BODY_THEKING:
 	case BODY_ELVISWAISTCOAT:
+#ifdef PD_PHYSICS
+	case BODY_MAIAN_SOLDIER: // MOD: ragdoll physics - Maian soldiers bleed green like the other Maians
+#endif
 		if (colour1) {
 			colour1[0] = 10;
 			colour1[1] = 0x40;
@@ -3518,7 +3572,14 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 			gdl = chrRenderCloak(gdl, chr->prop, chr->prop);
 		}
 
+#ifdef PD_PHYSICS
+		// MOD: ragdoll physics - a body lying through a doorway is in rooms
+		// its room list doesn't cover (and the far room's screen box shrinks
+		// as the door closes): don't clip it to its rooms, the z-buffer does
+		if (!ragdollIsChrRagdolled(chr) && func0f08e5a8(prop->rooms, &screenbox) > 0 && (chr->chrflags & CHRCFLAG_UNPLAYABLE) == 0) {
+#else
 		if (func0f08e5a8(prop->rooms, &screenbox) > 0 && (chr->chrflags & CHRCFLAG_UNPLAYABLE) == 0) {
+#endif
 			gdl = bgScissorWithinViewport(gdl, screenbox.xmin, screenbox.ymin, screenbox.xmax, screenbox.ymax);
 		} else {
 			gdl = bgScissorToViewport(gdl);
@@ -3632,7 +3693,12 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 
 		g_Vars.currentplayerstats->drawplayercount++;
 
+#ifdef PD_PHYSICS
+		// MOD: ragdoll physics - the door clip tests the anim root, which a ragdoll leaves where the chr died
+		if (!ragdollIsChrRagdolled(chr) && chr0f024738(chr)) {
+#else
 		if (chr0f024738(chr)) {
+#endif
 			var8005efc4 = chr0f024b18;
 		}
 
@@ -3646,6 +3712,14 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 			chrRenderAttachedObject(child, &renderdata, xlupass, chr);
 			child = child->next;
 		}
+#ifdef PD_PHYSICS
+
+		// MOD: ragdoll physics - caps over dismembered joints
+		if (!xlupass) {
+			renderdata.gdl = ragdollRenderCaps(renderdata.gdl, chr);
+		}
+
+#endif
 
 		gdl = renderdata.gdl;
 
@@ -4594,7 +4668,12 @@ void chrTestHit(struct prop *prop, struct shotdata *shotdata, bool isshooting, b
 	if ((chr->chrflags & CHRCFLAG_HIDDEN) == 0 && (prop->flags & PROPFLAG_ONTHISSCREENTHISTICK)) {
 		f32 radius = chrGetHitRadius(chr);
 
+#ifdef PD_PHYSICS
+		// MOD: ragdoll physics - cut pieces can be nearer than the body
+		if (prop->z - radius < shotdata->distance || ragdollHasCutPieces(chr)) {
+#else
 		if (prop->z - radius < shotdata->distance) {
+#endif
 			struct model *model = chr->model;
 			s32 hitpart = 0;
 			struct modelnode *node = NULL;
@@ -4611,6 +4690,11 @@ void chrTestHit(struct prop *prop, struct shotdata *shotdata, bool isshooting, b
 
 			if (func0f06b39c(&shotdata->gunpos2d, &shotdata->gundir2d, (struct coord *)rootmtx->m[3], radius)) {
 				spb8 = 1;
+#ifdef PD_PHYSICS
+				hitpart = 1;
+			} else if (ragdollShotNearCutPiece(chr, &shotdata->gunpos2d, &shotdata->gundir2d, radius)) {
+				// MOD: ragdoll physics - aiming at a cut piece away from the body
+#endif
 				hitpart = 1;
 			}
 
@@ -4720,6 +4804,20 @@ void chrHit(struct shotdata *shotdata, struct hit *hit)
 
 	chr = prop->chr;
 
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - shotgun pellets on a body (a whole shot on one
+	// limb can take it off)
+	if (hit->prop == prop || hit->prop->type != PROPTYPE_WEAPON) {
+		ragdollShotgunPelletHit(chr, hit->hitpart, &shotdata->gundir3d, &shotdata->gset);
+	}
+
+	// MOD: ragdoll physics - shots move dead and dying bodies (and ragdolled knockouts)
+	if (chr->actiontype == ACT_DEAD || chr->actiontype == ACT_DIE
+			|| ((chr->actiontype == ACT_DRUGGEDDROP || chr->actiontype == ACT_DRUGGEDKO) && ragdollIsChrRagdolled(chr))) {
+		ragdollOnChrShot(chr, hit->hitpart, &shotdata->gundir3d, &shotdata->gset);
+	}
+
+#endif
 	if ((chr->chrflags & CHRCFLAG_HIDDEN) == 0) {
 		sp98.x = shotdata->gunpos2d.x - (hit->distance * shotdata->gundir2d.x) / shotdata->gundir2d.z;
 		sp98.y = shotdata->gunpos2d.y - (hit->distance * shotdata->gundir2d.y) / shotdata->gundir2d.z;
@@ -4727,7 +4825,22 @@ void chrHit(struct shotdata *shotdata, struct hit *hit)
 
 		mtx4TransformVec(camGetProjectionMtxF(), &sp98, &hitpos);
 		bgunSetHitPos(&hitpos);
+#ifdef PD_PHYSICS
+
+		// MOD: ragdoll physics - a cut piece can be far from the body: the hit
+		// sound comes from where the shot landed
+		if (ragdollHasCutPieces(chr)) {
+			struct coord savedpos = hit->prop->pos;
+
+			hit->prop->pos = hitpos;
+			bgunPlayPropHitSound(&shotdata->gset, hit->prop, -1);
+			hit->prop->pos = savedpos;
+		} else {
+			bgunPlayPropHitSound(&shotdata->gset, hit->prop, -1);
+		}
+#else
 		bgunPlayPropHitSound(&shotdata->gset, hit->prop, -1);
+#endif
 
 		chrEmitSparks(chr, hit->prop, hit->hitpart, &hitpos, &shotdata->gundir3d, g_Vars.currentplayer->prop->chr);
 

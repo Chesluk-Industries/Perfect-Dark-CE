@@ -18,6 +18,9 @@
 #include "patch.h" // MOD: light patches - by joshuarwood (perfect_dark PR #722)
 #include "system.h"
 #include "utils.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 
 u32 g_OsMemSize = 0;
 s32 g_OsMemSizeMb = 16;
@@ -91,6 +94,9 @@ static void cleanup(void)
 	sysLogPrintf(LOG_NOTE, "shutdown");
 	inputSaveBinds();
 	configSave(CONFIG_PATH);
+#ifdef PD_PHYSICS
+	ragdollSysShutdown(); // MOD: ragdoll physics
+#endif
 	videoShutdown();
 	crashShutdown();
 	// TODO: actually shut down all subsystems
@@ -118,6 +124,9 @@ int main(int argc, const char **argv)
 
 	gameInit();
 
+#ifdef PD_PHYSICS
+	ragdollSysInit(); // MOD: ragdoll physics
+#endif
 	crashReinstall(); // MOD: crash logs
 
 	if (fsGetModDir()) {
@@ -174,6 +183,12 @@ PD_CONSTRUCTOR static void gameConfigInit(void)
 	configRegisterInt("Game.TickRateDivisor", &g_TickRateDiv, 0, 10);
 	configRegisterInt("Game.ExtraSleep", &g_TickExtraSleep, 0, 1);
 	configRegisterInt("Game.SkipIntro", &g_SkipIntro, 0, 1);
+#ifdef PD_PHYSICS
+	{
+		extern s32 g_WitnessFieldOfView; // MOD: witness field of view (chraction.c)
+		configRegisterInt("Game.WitnessFieldOfView", &g_WitnessFieldOfView, 0, 1);
+	}
+#endif
 	configRegisterInt("Game.DisableMpDeathMusic", &g_MusicDisableMpDeath, 0, 1);
 	configRegisterInt("Game.GEMuzzleFlashes", &g_BgunGeMuzzleFlashes, 0, 1);
 	configRegisterInt("Game.SplitscreenGlares", &g_SplitscreenGlares, 0, 1); // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)

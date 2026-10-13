@@ -1,0 +1,229 @@
+Perfect Dark PC port - ragdoll physics build
+Changes since the 2026-10-10 build
+==================================
+
+  See PLAYER_GUIDE.txt for every setting, its default and the controls.
+
+RAGDOLLS AND BODIES
+  - Bodies no longer slide down every slope like a slide: they hold on
+    ordinary ramps and only slide off steep ones (pd.ini: RagdollSlopeGrip).
+  - Knocked-out guards (tranquilizer, punches, all knockouts) become
+    ragdolls. They stay alive, unless they fall from a great height.
+  - Guards who see a body come over, kneel by it and search the area, and
+    they also check on knocked-out bodies.
+  - Held Bodies Stop Bullets (Ragdoll Interactions): a body you hold
+    between you and a guard takes his shots.
+  - Doors: a body caught in a closing door - an arm or a leg too - stops it,
+    and the door opens again after a moment.
+  - Glass is tougher: bodies only break normal glass when thrown hard, and
+    bulletproof glass only breaks from explosions.
+  - Blood sprays from wounds whenever there's dismemberment.
+  - Shielded characters (Cassandra in Extraction) take a thrown body on
+    their shield instead of stumbling, so their scripted walk carries on.
+  - Bodies in the air for 1.5 seconds (flung by a blast, a throw or a punch,
+    or falling) scream, as guards falling over a railing do, and the cry
+    follows the body: bodies that haven't come to rest yet (or are sent
+    flying within 2 seconds of first coming to rest), and knocked-out
+    guards (pd.ini: RagdollScreamAirTime). The air time only counts once
+    the body is free of its death animation. Now and then (1
+    in 100) a man lets out a rarer scream instead (data/sounds/scream.wav),
+    placed and following the body like the others.
+  - Grabbing (hold Use) works in the Ext control style with either Use
+    button (A on modern controllers didn't grab).
+  - The Laser's short-range stream can dismember when Damage Needed is at
+    its minimum (0.5).
+  - Cut-off pieces (head, arms, legs, torso) you carry now hit their own
+    body instead of passing through it, doors and objects where a piece is
+    (not just where the rest of the body is) stop it, and a piece thrown at
+    someone far from the rest of the body hits them and staggers them.
+  - Pieces carried far from the rest of the body no longer vanish.
+  - A body you're holding thuds when you swing it into a wall, a door or
+    another body (dragging it over the floor stays quiet), and cut pieces
+    far from the rest of their body are heard where they are.
+  - Grab Strength now defaults to 1.20x.
+  - pd.ini: the ragdoll settings have their own [Ragdoll] section (they were
+    in [Game]). An older pd.ini is still read, and its ragdoll settings are
+    moved there the next time it's saved.
+
+DEATH CAMERA
+  - While dead, the move keys make your body twitch and looking turns its
+    head (and the camera past what the neck allows), as fast as looking
+    while alive: your mouse speed, stick sensitivity and Look Up/Down
+    setting apply. In the Ext control style the sticks work as while alive
+    (the look stick looks, the move stick twitches).
+  - New option: Manual Skip (Death Camera..., under Immersive Death Camera).
+    The death screen waits until you press Start or Fire.
+  - Guards aim at your body's head after you die.
+
+NEW CHEAT: DEADLY PUNCH
+  - Unlocked like Hurricane Fists (Extraction, Agent, under 2:03). Punches
+    kill instead of knocking out, throw bodies hard and can split a body at
+    the waist. Hurricane Fists is back to the original.
+
+HIGH FRAMERATES (above 60 FPS)
+  - Guards on patrol no longer freeze, and guards moving off screen no longer
+    crawl at a quarter of their speed.
+  - Guards no longer spot you, leave cover or roll their dice faster than at
+    60 FPS; pistol guards no longer fire extra bullets in bursts.
+  - Levels end properly (the outro started but never finished).
+  - WAR!: Maians and Skedar no longer shoot their own side at the start.
+  - Extraction (and The Duel): the walk into the bodyguards' room no longer
+    breaks and leaves you stuck facing a wall.
+  - Explosions do their full lasting damage again.
+  - Rocket and grenade smoke trails, homing rockets, lightning, sun glare,
+    the combat boost effect, the HUD message sound, strafing, leaning,
+    guards on stairs, the CamSpy and the teleport effect now behave as at 60
+    FPS.
+  - The heartbeat and the Laser's stream sound no longer play too fast, and
+    the stream no longer doubles up when you strafe.
+
+FIXES
+  - Attack Ship: the Skedar sent out during the bridge defence appear
+    beside the Skedar sending them, not inside him (the two could end up
+    stuck in each other, more often at high framerates).
+  - Deep Sea: in the intro, the lift's motor sound stops as soon as the lift
+    is at rest at the bottom, and when the lift heads back up after the
+    cutscene its moving sound plays straight away (not only from the next
+    stop).
+
+ACCURATE PLAYER COLLISION
+  - Now experimental and off by default: Player Collision moved to
+    Extended > Physics > Debug as "Player Collision (Experimental)", on
+    Vanilla (the game's own collision). An existing pd.ini keeps its
+    setting. Bodies still use the accurate collision.
+  - Scripted walks (Extraction, The Duel) use the game's own collision.
+  - Area 51 (hangar and control room lifts): you can no longer walk out
+    through the sides of the lift, and bodies stay inside it too.
+
+LIGHTS (by joshuarwood)
+  - Our own lens flare and light glare changes are replaced by joshuarwood's
+    light work for the PC port (his pull requests #714, #722, #735 and #760
+    on perfect-dark-pc-port/perfect_dark):
+    - The gun and hands hide light glares behind them, tested against the
+      gun's model at the depth the N64 used (#714).
+    - Lights that were missing on PC are back in Defection, Villa and
+      Investigation, and the Dr. Caroll cutscene no longer loses its light:
+      the level files are patched at start-up into an "autopatch" folder in
+      the game's home folder (not with --moddir; --no-patches skips them).
+      Jon's double line in the Infiltration outro is fixed there too (#722).
+    - Light glares show through grated doors (#735).
+    - Split screen (co-op, counter-op and multiplayer) gets light glares,
+      suns and lens flares, each view its own (Options > Extended > Video >
+      Splitscreen Light Glares, on by default) (#760).
+    - Fixed a crash when the credits (or any screen without a level)
+      start, in the split-screen glare code.
+
+AUDIO
+  - 5.1 speaker levels (Extended > Audio > Levels...), greyed out on stereo
+    devices; Options > Audio > Surround Setup opens them while Sound is on
+    Surround.
+  - Dolby Surround: in stereo with Sound on Surround, the sound is Dolby
+    Surround encoded as on the N64.
+  - Sounds moving between speakers pan smoothly instead of stuttering.
+
+SOURCE
+  - The code is split into the port fixes and the ragdoll module, and the
+    fixes build on their own (no change in behaviour).
+  - The source folder of a release says what each change is: a fix (the
+    port behaving as the original), a non-vanilla change, or ragdoll /
+    physics (SOURCE_GUIDE.txt, CHANGED_FILES.txt, MOD_INDEX.txt), and
+    includes the two patches of the split.
+
+
+Changes in the 2026-10-10 build (since the 2026-10-04_2214 build)
+==================================================================
+
+REMOVED FROM THIS BUILD
+  - Settings that no longer exist:
+      Ragdoll Collision: ragdolls always use the accurate (drawn) collision,
+        except in the Combat Simulator.
+      Blend Time, Blend Hold: replaced by the new animation blend (below).
+
+RAGDOLLS
+  - Animation blend reworked. "Animation Blend" is now a chance (% of
+    deaths, default 80%). The death animation plays out with the body
+    following it, and physics takes over when the animation ends, on a
+    headshot, when the body touches a wall, object, character or another
+    body, or when there's no floor under it (ledges). The animation follows
+    slopes, stairs and moving lifts, and a shot makes the hit limb jolt.
+  - Ranged settings: Stiffness Level, Stiffness Fade Time and Reflex
+    Strength now have a Min and a Max. Each body picks its own value in
+    between, so deaths vary.
+  - Preset (Extended > Physics > Preset): "Default" puts every ragdoll and
+    dismemberment setting back to its default; any change shows "Custom".
+  - New setting: Headshot: Lifeless Drop (part of headshot deaths take no
+    push from the shot and simply drop).
+  - New setting: Reflex: Catch on Ledge. An arm or leg left on a ledge
+    holds the body for a moment as it goes over.
+  - New setting: Guards React to Bodies. A body thrown into a guard
+    staggers him, and a body moved into a guard's view counts as a death he
+    has seen. Guards no longer see bodies behind their backs.
+  - Characters Push Bodies:
+      Off: walking over a body no longer moves it. Everything else still
+        collides (bodies falling, sliding or thrown into someone).
+      On: walking into bodies nudges them gently.
+  - The world reacts to bodies:
+      impact sounds, dust and splashes that match the floor surface;
+      bodies slide differently on wood, stone, carpet, metal, mud, snow...;
+      bodies break glass and push light objects;
+      swinging doors push bodies, and a closing door stops at a body
+      instead of passing through it.
+  - Scripted deaths (the Villa snipers' falls, the Chicago guard going over
+    the railing) turn into ragdolls when the animation ends.
+  - Office chairs: the backrest is thicker for bodies, so they don't fall
+    through it.
+  - Arms no longer sink into the chest, and a body already on the floor no
+    longer pulls a hand into its chest.
+  - Reaper: only the spinning blades cut limbs, and grinding a body cuts it.
+  - Co-op: both players can grab bodies and objects; your old body is
+    cleared when you respawn; bodies no longer vanish when there are many.
+  - New defaults (all changeable, and restored by the Default preset):
+      Push Strength 0.8 (was 1.0), Animation Blend 80% (was off),
+      Stiffness Level 1.0-3.0 (was 1.0), Stiffness Fade Time 1.0-3.8 s
+      (was 3.4 s), Reflex Strength 1.2-2.0 (was 1.0), Brace Fall Chance 53%
+      (was 20%), Clutch Wound Chance 53% (was 70%), Headshot: No Reaction
+      40% (was 50%), Headshot: Lifeless Drop 40%, Dismemberment Chance 40%
+      (was 80%), H Key Spawns Dummy off.
+
+ACCURATE PLAYER COLLISION
+  - Ladders work exactly as in the original game.
+  - Invisible floors the game has (such as the shaft separators in
+    Defection) are kept, so you and bodies land on them as in the original.
+  - Railings, grates and glass panes are thicker, so bodies and the player
+    don't slip through.
+
+HIGH FRAMERATES (above 60 FPS)
+  - Smooth gun animations (no magazine shake), recoil and muzzle flash.
+  - Fixed at high FPS: drone and chopper guns, autoguns, footsteps, sparks,
+    slow motion at 240 FPS, decloaking, the Infiltration cutscene flash,
+    doors, lifts, crouching, turrets, hover vehicles, explosion shake,
+    weather, Dr Caroll's faces, the sneeze sound, sparking broken lights,
+    and many other timers that ran too fast.
+  - Somersault and roll animations no longer twitch mid-roll.
+  - Extraction: the keycard guard now always appears (at 240 FPS Dr Caroll
+    could count as "under attack" before the level started).
+
+GAMEPLAY
+  - The Falcon 2's sideways pose no longer stops it from firing.
+
+GRAPHICS
+  - Co-op and Counter-op now get the same effects as solo: suns and lens
+    flares, light glare, stars, flying cars, bullet impacts, smoke, glass
+    shards and the full decal budget.
+  - Split screen: light glare and lens flares no longer flicker, and the
+    gun now hides flares behind it in every view.
+  - Crossbow: stripes at the edge of its textures fixed.
+  - Shiny surfaces no longer turn see-through in the dark (fix ported from
+    murkantor's perfect_dark_netplay).
+  - New defaults: GUI Texture Filtering off, Unlimited Decals on, Clamp
+    Decals to Edges on.
+
+AUDIO
+  - 5.1 surround output (Extended > Audio), with a speaker test. With the
+    game's Sound mode set to Surround, sounds behind you come from the rear
+    speakers.
+  - Four times the sound capacity: sounds no longer cut out in busy fights.
+
+STABILITY
+  - Fixed a crash when loading a mission after changing key bindings.
+  - The ragdoll code was reorganised and optimised (no change in behaviour).

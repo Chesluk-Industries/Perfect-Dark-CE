@@ -8,6 +8,10 @@
 #include "system.h"
 #include "mixer.h" // MOD: surround 5.1
 #include "constants.h" // MOD: surround 5.1 - SOUNDMODE_SURROUND
+#ifdef PD_PHYSICS
+#include <string.h>
+#include "ragdoll.h" // MOD: ragdoll physics - the ragdolls' WAV sounds
+#endif
 
 extern s32 g_SoundMode; // MOD: surround 5.1 - the game's Sound option
 
@@ -55,6 +59,10 @@ static s32 speakerTestFrames = 0;  // frames played of the current step
 static u32 speakerTestSeed = 12345;
 static f32 speakerTestFilter = 0;
 static s16 *testBuf = NULL;
+#ifdef PD_PHYSICS
+static s16 *wavBuf = NULL; // MOD: ragdoll physics - the game's output with the ragdolls' WAV sounds
+static u32 wavBufFrames = 0;
+#endif
 static u32 testBufFrames = 0;
 
 #define SPEAKERTEST_ON_FRAMES  (22020 * 3 / 2) // 1.5 seconds of noise
@@ -310,8 +318,32 @@ static void audioFollowSoundMode(void)
 
 void audioSetNextBuffer(const s16 *buf, u32 len)
 {
+#ifdef PD_PHYSICS
+	s32 wav = buf && len && rdWavActive();
+
+#endif
 	audioFollowSoundMode();
 
+#ifdef PD_PHYSICS
+	if (wav) {
+		// MOD: ragdoll physics - the ragdolls' WAV sounds added to the game's
+		// (with 5.1, below: their rear part goes to the rear)
+		u32 frames = len / 4;
+
+		if (frames > wavBufFrames) {
+			wavBuf = realloc(wavBuf, frames * 2 * sizeof(s16));
+			wavBufFrames = frames;
+		}
+
+		memcpy(wavBuf, buf, frames * 2 * sizeof(s16));
+		buf = wavBuf;
+
+		if (outChannels != 6) {
+			rdWavMix(wavBuf, NULL, frames, audioDolby());
+		}
+	}
+
+#endif
 	if (outChannels == 6 && buf && len) {
 		// MOD: surround 5.1 - widen to 6 channels, with the rear from the mixer
 		u32 frames = len / 4;
@@ -325,6 +357,12 @@ void audioSetNextBuffer(const s16 *buf, u32 len)
 
 		mixerRearPop(rearBuf, frames);
 
+#ifdef PD_PHYSICS
+		if (wav) {
+			rdWavMix(wavBuf, rearBuf, frames, 0);
+		}
+
+#endif
 		for (i = 0; i < frames; i++) {
 			s32 l = buf[i * 2 + 0];
 			s32 r = buf[i * 2 + 1];

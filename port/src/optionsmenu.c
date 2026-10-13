@@ -15,6 +15,12 @@
 #include "input.h"
 #include "config.h"
 #include "audio.h" // MOD: surround 5.1
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
+#ifdef PD_CLIPCHECK
+#include "clipcheck.h" // MOD: clipping checks
+#endif
 
 static s32 g_ExtMenuPlayer = 0;
 static struct menudialogdef *g_ExtNextDialog = NULL;
@@ -2225,6 +2231,769 @@ static MenuItemHandlerResult menuhandlerOpenBindsMenu(s32 operation, struct menu
 	return 0;
 }
 
+#ifdef PD_CLIPCHECK
+/* MOD: clipping checks - Extended > Physics > Debug: the player's collision (experimental) */
+static MenuItemHandlerResult menuhandlerClipPlayerMode(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	static const char *opts[] = { "Vanilla", "Accurate", "Both" };
+
+	switch (operation) {
+	case MENUOP_GETOPTIONCOUNT:
+		data->dropdown.value = ARRAYCOUNT(opts);
+		break;
+	case MENUOP_GETOPTIONTEXT:
+		return (intptr_t) opts[data->dropdown.value];
+	case MENUOP_SET:
+		g_ClipPlayerMode = data->dropdown.value;
+		break;
+	case MENUOP_GETSELECTEDINDEX:
+		data->dropdown.value = g_ClipPlayerMode;
+		break;
+	}
+
+	return 0;
+}
+
+/* MOD: clipping checks - Extended > Physics > Debug > Collision View */
+static MenuItemHandlerResult menuhandlerClipDebug(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	static const char *opts[] = { "Off", "Drawn Surfaces", "Game Collision", "Both" };
+
+	switch (operation) {
+	case MENUOP_GETOPTIONCOUNT:
+		data->dropdown.value = ARRAYCOUNT(opts);
+		break;
+	case MENUOP_GETOPTIONTEXT:
+		return (intptr_t) opts[data->dropdown.value];
+	case MENUOP_SET:
+		g_ClipDebug = data->dropdown.value;
+		break;
+	case MENUOP_GETSELECTEDINDEX:
+		data->dropdown.value = g_ClipDebug;
+		break;
+	}
+
+	return 0;
+}
+#endif
+
+#ifdef PD_PHYSICS
+/* MOD: ragdoll physics - Extended > Physics */
+
+static MenuItemHandlerResult menuhandlerRagdolls(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_RagdollsEnabled;
+	case MENUOP_SET:
+		g_RagdollsEnabled = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+// MOD: ragdoll ranges - the low end of a ranged setting (each body rolls
+// between this and the setting itself); raising it past the max raises the max
+static MenuItemHandlerResult ragdollRangeMinSlider(s32 operation, union handlerdata *data, f32 *min, f32 *max, f32 base, bool disabled, const char *fmt)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return disabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = (*min - base) * 100.f + 0.5f;
+		if (data->slider.value < 0) {
+			data->slider.value = 0;
+		}
+		break;
+	case MENUOP_SET:
+		*min = base + (f32)data->slider.value / 100.f;
+		if (*max < *min) {
+			*max = *min;
+		}
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, fmt, base + (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMuscleStrengthMin(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollRangeMinSlider(operation, data, &g_RagdollMuscleStrengthMin, &g_RagdollMuscleStrength, 0.0f, !g_RagdollsEnabled || !g_RagdollMuscles, "%.2fx");
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMuscleTimeMin(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollRangeMinSlider(operation, data, &g_RagdollMuscleTimeMin, &g_RagdollMuscleTime, 0.1f, !g_RagdollsEnabled || !g_RagdollMuscles, "%.2f s");
+}
+
+static MenuItemHandlerResult menuhandlerRagdollReflexStrengthMin(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollRangeMinSlider(operation, data, &g_RagdollReflexStrengthMin, &g_RagdollReflexStrength, 0.0f, !g_RagdollsEnabled, "%.2fx");
+}
+
+static MenuItemHandlerResult menuhandlerRagdollPushScale(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollPushScale * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollPushScale = (f32)data->slider.value / 100.f;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.2fx", (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMaxBodies(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollMaxBodies;
+		break;
+	case MENUOP_SET:
+		g_RagdollMaxBodies = data->slider.value;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		if (data->slider.value == 0) {
+			sprintf(data->slider.label, "Unlimited");
+		} else {
+			sprintf(data->slider.label, "%d", data->slider.value);
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMaxPhysical(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollMaxPhysical;
+		break;
+	case MENUOP_SET:
+		g_RagdollMaxPhysical = data->slider.value;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		if (data->slider.value == 0) {
+			sprintf(data->slider.label, "Unlimited");
+		} else {
+			sprintf(data->slider.label, "%d", data->slider.value);
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollChrPush(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollChrPush;
+	case MENUOP_SET:
+		g_RagdollChrPush = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollGrab(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollGrab;
+	case MENUOP_SET:
+		g_RagdollGrab = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollGrabStrength(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollGrab;
+	case MENUOP_GETSLIDER:
+		data->slider.value = (g_RagdollGrabStrength - 0.25f) * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollGrabStrength = 0.25f + (f32)data->slider.value / 100.f;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.2fx", 0.25f + (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMuscles(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollMuscles;
+	case MENUOP_SET:
+		g_RagdollMuscles = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMuscleStrength(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollMuscles;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollMuscleStrength * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollMuscleStrength = (f32)data->slider.value / 100.f;
+		if (g_RagdollMuscleStrengthMin > g_RagdollMuscleStrength) {
+			g_RagdollMuscleStrengthMin = g_RagdollMuscleStrength; // MOD: ragdoll ranges
+		}
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.2fx", (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+// Slider 0-990 = 0.10-10.00 seconds
+static MenuItemHandlerResult menuhandlerRagdollMuscleTime(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollMuscles;
+	case MENUOP_GETSLIDER:
+		data->slider.value = (g_RagdollMuscleTime - 0.1f) * 100.f + 0.5f;
+		if (data->slider.value < 0) {
+			data->slider.value = 0;
+		}
+		break;
+	case MENUOP_SET:
+		g_RagdollMuscleTime = 0.1f + (f32)data->slider.value / 100.f;
+		if (g_RagdollMuscleTimeMin > g_RagdollMuscleTime) {
+			g_RagdollMuscleTimeMin = g_RagdollMuscleTime; // MOD: ragdoll ranges
+		}
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.2f s", 0.1f + (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult ragdollPercentSlider(s32 operation, union handlerdata *data, s32 *value, bool disabled)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return disabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = *value;
+		break;
+	case MENUOP_SET:
+		*value = data->slider.value;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%d%%", data->slider.value);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollBraceChance(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollReflexBraceChance, !g_RagdollsEnabled);
+}
+
+static MenuItemHandlerResult menuhandlerRagdollClutchChance(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollReflexClutchChance, !g_RagdollsEnabled);
+}
+
+static MenuItemHandlerResult menuhandlerRagdollHeadshotLimp(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollHeadshotLimpChance, !g_RagdollsEnabled);
+}
+
+// Of the no-reaction headshots, how many also take no push from the shot
+static MenuItemHandlerResult menuhandlerRagdollHeadshotLifeless(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollHeadshotLifelessChance, !g_RagdollsEnabled || g_RagdollHeadshotLimpChance <= 0);
+}
+
+// 0% off, 100% every death; in between, each death rolls: animation first, or straight to the ragdoll
+static MenuItemHandlerResult menuhandlerRagdollAnimBlend(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollAnimBlend, !g_RagdollsEnabled);
+}
+
+static MenuItemHandlerResult menuhandlerRagdollReflexStumble(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollReflexStumble;
+	case MENUOP_SET:
+		g_RagdollReflexStumble = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollReflexHead(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollReflexHead;
+	case MENUOP_SET:
+		g_RagdollReflexHead = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollReflexStrength(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollReflexStrength * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollReflexStrength = (f32)data->slider.value / 100.f;
+		if (g_RagdollReflexStrengthMin > g_RagdollReflexStrength) {
+			g_RagdollReflexStrengthMin = g_RagdollReflexStrength; // MOD: ragdoll ranges
+		}
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.2fx", (f32)data->slider.value / 100.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollDeathCam(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollDeathCam;
+	case MENUOP_SET:
+		g_RagdollDeathCam = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollDeathCamSmooth(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDeathCam;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollDeathCamSmooth * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollDeathCamSmooth = (f32)data->slider.value / 100.f;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%d%%", data->slider.value);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollDeathCamBodyView(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDeathCam;
+	case MENUOP_GETSLIDER:
+		data->slider.value = g_RagdollDeathCamBodyView * 100.f + 0.5f;
+		break;
+	case MENUOP_SET:
+		g_RagdollDeathCamBodyView = (f32)data->slider.value / 100.f;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%d%%", data->slider.value);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollDeathCamHold(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDeathCam;
+	case MENUOP_GET:
+		return g_RagdollDeathCamHold;
+	case MENUOP_SET:
+		g_RagdollDeathCamHold = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollTestSpawnKey(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollTestSpawnKey;
+	case MENUOP_SET:
+		g_RagdollTestSpawnKey = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerDismember(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollDismember;
+	case MENUOP_SET:
+		g_RagdollDismember = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerDismemberChance(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return ragdollPercentSlider(operation, data, &g_RagdollDismemberChance, !g_RagdollsEnabled || !g_RagdollDismember);
+}
+
+// Slider 0-95 = damage 0.5-10.0
+static MenuItemHandlerResult menuhandlerDismemberDamage(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDismember;
+	case MENUOP_GETSLIDER:
+		data->slider.value = (g_RagdollDismemberDamage - 0.5f) * 10.f + 0.5f;
+		if (data->slider.value < 0) {
+			data->slider.value = 0;
+		}
+		break;
+	case MENUOP_SET:
+		g_RagdollDismemberDamage = 0.5f + (f32)data->slider.value / 10.f;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%.1f", 0.5f + (f32)data->slider.value / 10.f);
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerDismemberExplosions(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDismember;
+	case MENUOP_GET:
+		return g_RagdollDismemberExplosions;
+	case MENUOP_SET:
+		g_RagdollDismemberExplosions = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerDismemberTorso(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollDismember;
+	case MENUOP_GET:
+		return g_RagdollDismemberTorso;
+	case MENUOP_SET:
+		g_RagdollDismemberTorso = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+struct menuitem g_ExtendedDismemberMenuItems[] = {
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Dismemberment", 0, menuhandlerDismember },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Explosions Dismember", 0, menuhandlerDismemberExplosions },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Torso Can Split", 0, menuhandlerDismemberTorso },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Dismemberment Chance", 100, menuhandlerDismemberChance },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Damage Needed", 95, menuhandlerDismemberDamage },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedDismemberMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Dismemberment Options",
+	g_ExtendedDismemberMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+static MenuItemHandlerResult menuhandlerRagdollLedgeCatch(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollLedgeCatch;
+	case MENUOP_SET:
+		g_RagdollLedgeCatch = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+struct menuitem g_ExtendedReactionsMenuItems[] = {
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Reflex: Stumble", 0, menuhandlerRagdollReflexStumble },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Reflex: Head Guard", 0, menuhandlerRagdollReflexHead },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Reflex: Catch on Ledge", 0, menuhandlerRagdollLedgeCatch },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Reflex Strength Min", 300, menuhandlerRagdollReflexStrengthMin },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Reflex Strength Max", 300, menuhandlerRagdollReflexStrength },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Brace Fall Chance", 100, menuhandlerRagdollBraceChance },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Clutch Wound Chance", 100, menuhandlerRagdollClutchChance },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Headshot: No Reaction", 100, menuhandlerRagdollHeadshotLimp },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Headshot: Lifeless Drop", 100, menuhandlerRagdollHeadshotLifeless },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedReactionsMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Reaction Options",
+	g_ExtendedReactionsMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+struct menuitem g_ExtendedDeathCamMenuItems[] = {
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Immersive Death Camera", 0, menuhandlerRagdollDeathCam },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Manual Skip", 0, menuhandlerRagdollDeathCamHold },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Smoothing", 95, menuhandlerRagdollDeathCamSmooth },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Body Awareness", 100, menuhandlerRagdollDeathCamBodyView },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedDeathCamMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Death Camera Options",
+	g_ExtendedDeathCamMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+static MenuItemHandlerResult menuhandlerRagdollBodyAlerts(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GET:
+		return g_RagdollBodyAlerts;
+	case MENUOP_SET:
+		g_RagdollBodyAlerts = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollBodyCover(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled || !g_RagdollGrab;
+	case MENUOP_GET:
+		return g_RagdollBodyCover;
+	case MENUOP_SET:
+		g_RagdollBodyCover = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+struct menuitem g_ExtendedInteractionMenuItems[] = {
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Characters Push Bodies", 0, menuhandlerRagdollChrPush },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Grab Bodies and Objects (Hold Use)", 0, menuhandlerRagdollGrab },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Held Bodies Stop Bullets", 0, menuhandlerRagdollBodyCover },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Guards React to Bodies", 0, menuhandlerRagdollBodyAlerts },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Grab Strength", 375, menuhandlerRagdollGrabStrength },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedInteractionMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Ragdoll Interactions",
+	g_ExtendedInteractionMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+struct menuitem g_ExtendedBehaviourMenuItems[] = {
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Animation Blend", 100, menuhandlerRagdollAnimBlend },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Body Stiffness", 0, menuhandlerRagdollMuscles },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Stiffness Level Min", 300, menuhandlerRagdollMuscleStrengthMin },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Stiffness Level Max", 300, menuhandlerRagdollMuscleStrength },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Stiffness Fade Time Min", 990, menuhandlerRagdollMuscleTimeMin },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Stiffness Fade Time Max", 990, menuhandlerRagdollMuscleTime },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Reactions...\n", 0, (void *)&g_ExtendedReactionsMenuDialog },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Dismemberment...\n", 0, (void *)&g_ExtendedDismemberMenuDialog },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Death Camera...\n", 0, (void *)&g_ExtendedDeathCamMenuDialog },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedBehaviourMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Ragdoll Behaviours",
+	g_ExtendedBehaviourMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+struct menuitem g_ExtendedPhysicsDebugMenuItems[] = {
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"H Key Spawns Dummy", 0, menuhandlerRagdollTestSpawnKey },
+#ifdef PD_CLIPCHECK
+	{ MENUITEMTYPE_DROPDOWN, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Player Collision (Experimental)", 0, menuhandlerClipPlayerMode }, // MOD: clipping checks
+	{ MENUITEMTYPE_DROPDOWN, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Collision View", 0, menuhandlerClipDebug }, // MOD: clipping checks
+#endif
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedPhysicsDebugMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Physics Debug",
+	g_ExtendedPhysicsDebugMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+/* MOD: physics presets - Extended > Physics > Preset: Default puts every
+   ragdoll/dismemberment setting back to its default; any change shows Custom */
+static MenuItemHandlerResult menuhandlerRagdollPreset(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	static const char *opts[] = { "Default", "Custom" };
+
+	switch (operation) {
+	case MENUOP_GETOPTIONCOUNT:
+		data->dropdown.value = ARRAYCOUNT(opts);
+		break;
+	case MENUOP_GETOPTIONTEXT:
+		return (intptr_t) opts[data->dropdown.value];
+	case MENUOP_SET:
+		ragdollPresetApply(data->dropdown.value);
+		break;
+	case MENUOP_GETSELECTEDINDEX:
+		data->dropdown.value = ragdollPresetGet();
+		break;
+	}
+
+	return 0;
+}
+
+struct menuitem g_ExtendedPhysicsMenuItems[] = {
+	{ MENUITEMTYPE_DROPDOWN, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Preset", 0, menuhandlerRagdollPreset },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdolls", 0, menuhandlerRagdolls },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Push Strength", 1000, menuhandlerRagdollPushScale },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Bodies", RD_MAXBODIES_LIMIT, menuhandlerRagdollMaxBodies },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Simulated Bodies", RD_MAXBODIES_LIMIT, menuhandlerRagdollMaxPhysical },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdoll Behaviours...\n", 0, (void *)&g_ExtendedBehaviourMenuDialog },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdoll Interactions...\n", 0, (void *)&g_ExtendedInteractionMenuDialog },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Debug...\n", 0, (void *)&g_ExtendedPhysicsDebugMenuDialog },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedPhysicsMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Extended Physics Options",
+	g_ExtendedPhysicsMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+#endif
+
 struct menuitem g_ExtendedMenuItems[] = {
 	{
 		MENUITEMTYPE_SELECTABLE,
@@ -2274,6 +3043,16 @@ struct menuitem g_ExtendedMenuItems[] = {
 		0,
 		menuhandlerOpenBindsMenu,
 	},
+#ifdef PD_PHYSICS
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Physics\n",
+		0,
+		(void *)&g_ExtendedPhysicsMenuDialog, // MOD: ragdoll physics
+	},
+#endif
 	{
 		MENUITEMTYPE_SEPARATOR,
 		0,

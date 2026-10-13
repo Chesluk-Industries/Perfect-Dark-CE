@@ -1,5 +1,9 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#include "game/cheats.h" // MOD: Deadly Punch
+#endif
 #include "game/acosfasinf.h"
 #include "game/atan2f.h"
 #include "game/bg.h"
@@ -3402,6 +3406,11 @@ void chrBeginDeath(struct chrdata *chr, struct coord *dir, f32 relangle, s32 hit
 
 		chrDropConcealedItems(chr);
 	}
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - real deaths of humans become ragdolls
+	ragdollOnChrDeath(chr, dir, hitpart, gset, knockout);
+#endif
 }
 
 void chrBeginArgh(struct chrdata *chr, f32 angle, s32 hitpart)
@@ -3691,6 +3700,12 @@ void chrYeetFromPos(struct chrdata *chr, struct coord *exppos, f32 force)
 		if (row->endframe >= 0.0f) {
 			modelSetAnimEndFrame(model, row->endframe);
 		}
+#ifdef PD_PHYSICS
+
+		// MOD: ragdoll physics - humans killed by a blast become ragdolls and
+		// are thrown by the explosion instead of the scripted animation
+		ragdollOnChrYeet(chr, exppos);
+#endif
 	}
 }
 
@@ -4275,6 +4290,15 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 	s32 aplayernum = -1;
 	s32 choketype = CHOKETYPE_NONE;
 
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - remember what hit the player, so their body
+	// (death camera) is knocked back like NPCs are
+	if (vprop && vprop->type == PROPTYPE_PLAYER && vector && !explosion) {
+		ragdollOnPlayerHit(vprop, vector, hitpart, gset);
+	}
+
+#endif
 	if (hitpart == HITPART_HEAD) {
 		choketype = CHOKETYPE_GURGLE;
 	}
@@ -4362,6 +4386,14 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 	func = gsetGetWeaponFunction(gset);
 	ismelee = func && (func->type & 0xff) == INVENTORYFUNCTYPE_MELEE;
 	makedizzy = race != RACE_DRCAROLL && gsetHasFunctionFlags(gset, FUNCFLAG_MAKEDIZZY);
+#ifdef PD_PHYSICS
+
+	// MOD: Deadly Punch - the cheat's punch kills (a punch only dizzies and
+	// knocks out otherwise; the disarm still does)
+	if (makedizzy && cheatIsDeadlyPunch(gset)) {
+		makedizzy = false;
+	}
+#endif
 
 	if (chr->prop == g_Vars.currentplayer->prop && g_Vars.currentplayer->invincible) {
 		return;
@@ -4937,8 +4969,19 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 				forceapplydamage = true;
 			}
 
+#ifdef PD_PHYSICS
+			// MOD: Deadly Punch - no knockout from behind either: it kills
+			if (cheatIsDeadlyPunch(gset)) {
+				onehitko = false;
+			}
+
+#endif
 			// Handle one-hit knockouts
 			if (onehitko && chr->aibot == NULL && race == RACE_HUMAN) {
+#ifdef PD_PHYSICS
+				// MOD: ragdoll physics - knockouts fall as ragdolls
+				ragdollOnChrKnockOut(chr, vector, hitpart, gset);
+#endif
 				chrKnockOut(chr, angle, hitpart, gset);
 				psStopSound(chr->prop, PSTYPE_CHRTALK, 0);
 
@@ -5046,6 +5089,10 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 
 					if (makedizzy && chr->damage >= chr->maxdamage) {
 						chr->damage = chr->maxdamage - 0.1f;
+#ifdef PD_PHYSICS
+						// MOD: ragdoll physics - knockouts fall as ragdolls
+						ragdollOnChrKnockOut(chr, vector, hitpart, gset);
+#endif
 						chrKnockOut(chr, angle, hitpart, gset);
 					}
 
@@ -8213,7 +8260,12 @@ void chrFadeCorpse(struct chrdata *chr)
 
 void chrFadeCorpseWhenOffScreen(struct chrdata *chr)
 {
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - ragdoll corpses stay (Ragdoll.RagdollMaxBodies limits them)
+	if (chr->actiontype == ACT_DEAD && !ragdollIsChrRagdolled(chr)) {
+#else
 	if (chr->actiontype == ACT_DEAD) {
+#endif
 		chr->act_dead.fadewheninvis = true;
 	}
 }
@@ -8282,6 +8334,41 @@ void chrTickDead(struct chrdata *chr)
  * from there next time the function is called. The function is called on
  * subsequent ticks while the chr is still in their injured or dying action.
  */
+#ifdef PD_PHYSICS
+/**
+ * MOD: witness field of view - noticing a chr get hurt or killed only needs
+ * line of sight, so guards notice a death right behind them (Air Base: the
+ * patrolling guard turning round for the first guard killed). The game
+ * works out a field of view for this (100 degrees either side, in
+ * chrHasLosToPosWasteful) but never uses it; with Game.WitnessFieldOfView on
+ * it does.
+ */
+s32 g_WitnessFieldOfView = 1;
+
+bool chrCanWitness(struct chrdata *chr, struct coord *pos, RoomNum *rooms) // (also used by the ragdoll module)
+{
+	if (g_WitnessFieldOfView) {
+		f32 facingangle = chrGetInverseTheta(chr);
+		f32 posangle = atan2f(pos->x - chr->prop->pos.x, pos->z - chr->prop->pos.z);
+		f32 diffangle = posangle - facingangle;
+
+		while (diffangle < 0) {
+			diffangle += M_BADTAU;
+		}
+
+		while (diffangle >= M_BADTAU) {
+			diffangle -= M_BADTAU;
+		}
+
+		if (diffangle >= 1.7450513839722f && diffangle <= 4.5371336936951f) {
+			return false;
+		}
+	}
+
+	return chrHasLosToPosWasteful(chr, pos, rooms);
+}
+
+#endif
 void chrAlertOthersOfInjury(struct chrdata *chr, bool dying)
 {
 	s32 index = 0;
@@ -8296,7 +8383,12 @@ void chrAlertOthersOfInjury(struct chrdata *chr, bool dying)
 		index = chr->act_argh.notifychrindex;
 	} else if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DRUGGEDDROP) {
 		index = chr->act_die.notifychrindex;
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - a knocked-out body moved is checked like a dead one
+	} else if (chr->actiontype == ACT_DEAD || chr->actiontype == ACT_DRUGGEDKO) {
+#else
 	} else if (chr->actiontype == ACT_DEAD) {
+#endif
 		index = chr->act_dead.notifychrindex;
 	}
 
@@ -8316,11 +8408,18 @@ void chrAlertOthersOfInjury(struct chrdata *chr, bool dying)
 			if (xdiff * xdiff + ydiff * ydiff + zdiff * zdiff < 4000000.0f) {
 				numinrange++;
 
+#ifdef PD_PHYSICS
+				if (chrCanWitness(loopchr, &chr->prop->pos, chr->prop->rooms)) { // MOD: witness field of view
+#else
 				if (chrHasLosToPosWasteful(loopchr, &chr->prop->pos, chr->prop->rooms)) {
+#endif
 					if (dying == false) {
 						loopchr->chrseeshot = chr->chrnum;
 					} else {
 						loopchr->chrseedie = chr->chrnum;
+#ifdef PD_PHYSICS
+						ragdollOnWitnessDeath(loopchr, chr); // MOD: ragdoll physics - guards look the body over
+#endif
 					}
 				}
 			}
@@ -8331,7 +8430,11 @@ void chrAlertOthersOfInjury(struct chrdata *chr, bool dying)
 		chr->act_argh.notifychrindex = index;
 	} else if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DRUGGEDDROP) {
 		chr->act_die.notifychrindex = index;
+#ifdef PD_PHYSICS
+	} else if (chr->actiontype == ACT_DEAD || chr->actiontype == ACT_DRUGGEDKO) {
+#else
 	} else if (chr->actiontype == ACT_DEAD) {
+#endif
 		chr->act_dead.notifychrindex = index;
 	}
 }
@@ -8436,6 +8539,19 @@ void chrTickDie(struct chrdata *chr)
 		return;
 	}
 
+#ifdef PD_PHYSICS
+	// MOD: ragdoll physics - the ragdoll decides when the chr is dead
+	if (ragdollIsChrRagdolled(chr)) {
+		if (ragdollIsChrSettled(chr)) {
+			chrBeginDead(chr);
+		} else {
+			ragdollAlertOthersOfDeath(chr); // looks a little above the body, not at its pelvis by the floor
+		}
+
+		return;
+	}
+
+#endif
 	// Human or Skedar
 	// If due, play thud 1 sound
 	if (chr->act_die.thudframe1 >= 0 && modelGetCurAnimFrame(model) >= chr->act_die.thudframe1) {
@@ -8482,6 +8598,13 @@ void chrTickDie(struct chrdata *chr)
 			modelSetAnimSpeed(model, 0.5, animGetNumFrames(ANIM_003C) - 51.0f);
 			return;
 		}
+#ifdef PD_PHYSICS
+
+		// MOD: ragdoll physics - a scripted death fall ends as a ragdoll
+		if (ragdollOnSpecialDieEnd(chr)) {
+			return;
+		}
+#endif
 
 		chrBeginDead(chr);
 	}
@@ -8562,6 +8685,11 @@ void chrTickDruggedComingUp(struct chrdata *chr)
 		}
 
 		chrDropConcealedItems(chr);
+#ifdef PD_PHYSICS
+
+		// MOD: ragdoll physics - a knockout falls as a ragdoll
+		ragdollOnKnockOutFall(chr);
+#endif
 	}
 }
 
@@ -8584,6 +8712,25 @@ void chrTickDruggedDrop(struct chrdata *chr)
 	};
 
 	static s32 thudindex = 0;
+#ifdef PD_PHYSICS
+
+	// MOD: ragdoll physics - a ragdolled knockout is out cold once the body
+	// comes to rest (the ragdoll makes its own thuds)
+	if (ragdollIsChrRagdolled(chr)) {
+		if (ragdollIsChrSettled(chr)) {
+			chr->actiontype = ACT_DRUGGEDKO;
+			chr->act_dead.fadetimer60 = chr->aibot ? 0 : -1;
+			chr->act_dead.fadenow = false;
+			chr->act_dead.fadewheninvis = false;
+			chr->act_dead.invistimer60 = 0;
+			chr->act_dead.notifychrindex = 0;
+			chr->sleep = 0;
+		}
+
+		ragdollAlertOthersOfDeath(chr); // looks a little above the body, not at its pelvis by the floor
+		return;
+	}
+#endif
 
 	// If due, play thud 1 sound
 	if (chr->act_die.thudframe1 >= 0 && modelGetCurAnimFrame(model) >= chr->act_die.thudframe1) {
@@ -10351,6 +10498,13 @@ void chrTickShoot(struct chrdata *chr, s32 handnum)
 								hitpos.y -= 2 + rngRandom() % 10;
 							}
 
+#ifdef PD_PHYSICS
+							// MOD: bodies as cover - a body the player holds in the
+							// way takes the shot (hitpos becomes where it hit it)
+							if (ragdollBodyBlocksShot(chr, targetprop, &gunpos, &hitpos, &vector, &gset, &hitpos)) {
+								effective = false;
+							} else {
+#endif
 							bgunPlayPropHitSound(&gset, targetprop, -1);
 
 							if (targetchr->model && chrGetShield(targetchr) > 0) {
@@ -10358,6 +10512,9 @@ void chrTickShoot(struct chrdata *chr, s32 handnum)
 							}
 
 							func0f0341dc(targetchr, damage, &vector, &gset, chr->prop, HITPART_GENERAL, targetprop, node, model, side, NULL);
+#ifdef PD_PHYSICS
+							}
+#endif
 						} else if ((hitprop == NULL || (hitprop->type != PROPTYPE_CHR && hitprop->type != PROPTYPE_PLAYER))
 								&& sqshotdist < 100.0f * 100.0f) {
 							// Hit the background or something other than a
@@ -13781,8 +13938,14 @@ void chraTickBg(void)
 				}
 
 #if VERSION >= VERSION_NTSC_1_0
+#ifdef PD_PHYSICS
+				if ((chr->actiontype == ACT_DEAD
+						|| (chr->actiontype == ACT_DRUGGEDKO && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0))
+						&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - own limits
+#else
 				if (chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0)) {
+#endif
 					if (chr->hidden2 & CHRH2FLAG_SPAWNED) {
 						spawns[spawnslen] = chr;
 						spawnslen++;
@@ -13861,8 +14024,14 @@ void chraTickBg(void)
 				}
 #endif
 
+#ifdef PD_PHYSICS
+				if ((chr->actiontype == ACT_DEAD
+						|| (chr->actiontype == ACT_DRUGGEDKO && chr->prop && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0))
+						&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - own limits (Ragdoll.RagdollMaxBodies)
+#else
 				if (chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && chr->prop && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0)) {
+#endif
 					if (chr->prop->flags & PROPFLAG_ONANYSCREENPREVTICK) {
 						// On-screen
 						if (chr->act_dead.fadetimer60 < 0 && !chr->act_dead.fadenow) {

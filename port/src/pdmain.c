@@ -59,6 +59,9 @@
 #include "lib/snd.h"
 #include "lib/memp.h"
 #include "lib/mema.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 #include "lib/model.h"
 #include "lib/profile.h"
 #include "lib/videbug.h"
@@ -423,7 +426,15 @@ void mainLoop(void)
 			g_MainMemaHeapSize = strtol(argFindByPrefix(1, "-ma"), NULL, 0) * 1024;
 		}
 
+#ifdef PD_PHYSICS
+		{
+			// MOD: ragdoll physics - room for the bigger chr vertex store (vtxstorereset.c)
+			u32 memasize = g_MainMemaHeapSize + (g_RagdollsEnabled ? RD_MAINMEMA_EXTRA : 0);
+			memaReset(mempAlloc(memasize, MEMPOOL_STAGE), memasize);
+		}
+#else
 		memaReset(mempAlloc(g_MainMemaHeapSize, MEMPOOL_STAGE), g_MainMemaHeapSize);
+#endif
 		langReset(g_StageNum);
 		playermgrReset();
 

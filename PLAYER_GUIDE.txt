@@ -1,0 +1,309 @@
+PERFECT DARK PC PORT - RAGDOLL PHYSICS BUILD
+Player guide
+============================================
+
+Contents
+  1. Setting up
+  2. What this build adds
+  3. Ragdolls and bodies
+  4. Controls
+  5. The death camera
+  6. Options > Extended > Physics
+  7. Video and audio options
+  8. The Deadly Punch cheat
+  9. Settings only in pd.ini
+ 10. High frame rates
+ 11. Co-op and multiplayer
+ 12. Problems and crash logs
+
+
+1. SETTING UP
+-------------
+  1. Put your own Perfect Dark ROM in the data folder, named
+     pd.ntsc-final.z64 (NTSC 1.1 / "final"). The ROM isn't included.
+  2. Run pd.x86_64.exe. To report a problem, use run_with_log.bat instead:
+     it also writes pd.log next to the exe.
+
+  Settings are saved in pd.ini. To go back to this build's defaults, delete
+  pd.ini (or use Options > Extended > Physics > Preset > Default for the
+  physics settings).
+
+
+2. WHAT THIS BUILD ADDS
+-----------------------
+  Ragdoll physics
+    Bodies fall, tumble and slide for real. Shots, blasts and characters push
+    them around, they can be grabbed and dragged, and they react to what kills
+    them.
+
+  Accurate collision
+    Bodies collide with the level as it's drawn, not only with the game's
+    simplified collision, so they no longer fall through gaps or slip
+    through railings the original missed. The same for you is an
+    experimental option (Physics > Debug > Player Collision).
+
+  Fixes and improvements to the port
+    - Plays correctly above 60 FPS: guards, scripts, weapons, effects, sounds
+      and timers all run at the right speed at any frame rate.
+    - 5.1 surround output, Dolby Surround in stereo, smooth sound panning.
+    - Bullet holes, blood and scorch marks: no limit on how many stay, and
+      they no longer hang off the edges of surfaces.
+    - Shiny surfaces (floors, glass) look right in the dark again.
+    - Light fixes by joshuarwood: the gun hides light glares behind it,
+      missing lights restored in Defection, Villa and Investigation, glares
+      through grated doors, and glares in split screen.
+    - Texture glitches on some rock and wall textures are fixed.
+    - Co-op gets the full single player effects (smoke, sparks, corpses).
+    - A crash writes a log you can send in (see section 12).
+
+
+3. RAGDOLLS AND BODIES
+----------------------
+  Dying
+    - Most deaths start with the game's death animation and hand over to
+      physics as the body hits something, loses its footing or gets shot
+      again. Headshots can drop a guard instantly.
+    - Dying guards react: they stumble when shot running, brace their fall,
+      clutch the wound, catch themselves on ledges and protect their head.
+    - Strong weapons, explosions and a full shotgun blast to one limb can take
+      limbs off (and, rarely, split the body at the waist). Blood sprays from
+      the wounds, and blood splats carry round corners.
+    - Knocked-out guards (tranquilizer, punches) also become ragdolls. They
+      stay alive, unless they fall from a great height.
+
+  Bodies in the world
+    - Bodies slide down steep slopes but stay put on ordinary ramps, float in
+      water, and are pushed by explosions, gunfire and moving doors and lifts.
+    - A body (even an arm or leg) caught in a closing door stops it, and the
+      door opens again after a moment.
+    - Bodies thrown hard enough break normal glass. Bulletproof glass still
+      only breaks from explosions.
+    - Corpses stay around much longer than in the original game.
+
+  Guards and bodies
+    - Guards who see a body (or one being moved or thrown) come to look at
+      it, kneel by it and then search the area.
+    - A body thrown at a guard staggers him and gives you away. Shielded
+      characters (like Cassandra) only take it on their shield.
+    - Guards only notice a death they could actually see happen: a guard
+      looking the other way doesn't.
+
+  Grabbing
+    - Hold Use while looking at a body or a loose object nearby to pick it
+      up; let go to drop it. In the Ext control style either Use button
+      works (A or B on a modern controller). A body held between you and a guard takes the
+      guard's shots for you.
+
+
+4. CONTROLS
+-----------
+  Hold Use ............. grab a body or object (Grab must be on)
+  Move keys ............ while dead: your body twitches
+  Look (mouse/stick) ... while dead: look around through your body's eyes
+  Start or Fire ........ while dead with Manual Skip on: continue
+  H .................... spawn a test dummy (only with H Key Spawns Dummy on)
+
+  Nothing else changes: all the game's own controls work as before.
+
+
+5. THE DEATH CAMERA
+-------------------
+  With Immersive Death Camera on, when you die you see the fall through your
+  own body's eyes, and your gun drops from your hands.
+    - The move keys make the body twitch; looking turns the head and, past
+      what the neck allows, the camera. Looking turns as fast as it does
+      while alive: your mouse speed, stick sensitivity and Look Up/Down
+      setting apply.
+    - Guards keep firing at your body's head for a moment.
+    - With Manual Skip on, the death screen waits until you press Start or
+      Fire, so you can watch what happens to the body.
+
+
+6. OPTIONS > EXTENDED > PHYSICS
+-------------------------------
+  Defaults are in brackets.
+
+  Preset [Default]
+    Default puts every physics setting back to this build's defaults. It
+    shows Custom once you change something.
+  Ragdolls [On]
+    Off plays exactly like the original game (animated deaths).
+  Push Strength [0.80x]
+    How hard shots, blasts and characters push bodies.
+  Max Bodies [Unlimited]
+    How many corpses stay as ragdolls; past this the oldest fades out.
+  Max Simulated Bodies [Unlimited]
+    How many of them keep moving physically; older ones freeze where they
+    lie. Lower these on a slow PC.
+
+  Ragdoll Behaviours...
+    Animation Blend [80%]
+      Share of deaths that start with the death animation before physics
+      takes over (the rest go limp at once).
+    Body Stiffness [On]
+      Dying bodies keep some muscle tension for a few seconds.
+    Stiffness Level Min / Max [1.00 / 3.00]
+    Stiffness Fade Time Min / Max [1.0 s / 3.8 s]
+      How stiff the body starts, and how long it takes to go limp. Each death
+      picks a value between Min and Max.
+    Reactions...
+      Reflex: Stumble [On] ........ shot while running, the legs carry on
+      Reflex: Head Guard [On] ..... the neck keeps the head from slamming down
+      Reflex: Catch on Ledge [On] . a dying body can grab a ledge edge
+      Reflex Strength Min / Max ... [1.20 / 2.00] how strong the reflexes are
+      Brace Fall Chance [53%] ..... the arms reach out to break the fall
+      Clutch Wound Chance [53%] ... a hand goes to the wound
+      Headshot: No Reaction [40%] . headshots that go limp at once
+      Headshot: Lifeless Drop [40%] of those, ones that just drop (no push)
+    Dismemberment...
+      Dismemberment [On]
+      Explosions Dismember [On]
+      Torso Can Split [On]
+      Dismemberment Chance [40%] .. when the hit is strong enough
+      Damage Needed [2.0] ......... weapon damage needed (Falcon 2 = 1,
+                                    DY357 Magnum = 2); at 0.5 the
+                                    Laser's stream cuts too
+    Death Camera...
+      Immersive Death Camera [On]
+      Manual Skip [Off]
+      Smoothing [50%] ............. smooths the camera's motion
+      Body Awareness [80%] ........ how much the camera keeps your body in view
+
+  Ragdoll Interactions...
+    Characters Push Bodies [Off]
+      On: walking into bodies shoves them. Off: you and guards step over them
+      (a body thrown at someone still hits them).
+    Grab Bodies and Objects (Hold Use) [On]
+    Held Bodies Stop Bullets [On]
+    Guards React to Bodies [On]
+    Grab Strength [1.20x]
+
+  Debug...
+    H Key Spawns Dummy [Off] ... H spawns a test guard in front of you
+    Player Collision (Experimental) [Vanilla]
+      Vanilla ... the game's own collision only (exactly as the original)
+      Accurate .. the level as it's drawn
+      Both ...... the game's collision, with the drawn level filling the gaps
+      Experimental: Accurate and Both can still let you through or stop you
+      in places the original doesn't. Ladders, the Combat Simulator and the
+      scripted walks (Extraction, The Duel) always use the game's own
+      collision.
+    Collision View [Off] ........ shows the collision around you
+
+
+7. VIDEO AND AUDIO OPTIONS
+--------------------------
+  Options > Extended > Video
+    Unlimited Decals [On]
+      Bullet holes, blood and scorch marks stay instead of the oldest
+      disappearing. Takes effect on the next level.
+    Clamp Decals to Edges [On]
+      Decals no longer hang off the edge of the surface they're on.
+    Splitscreen Light Glares [On]
+      Light glares, suns and lens flares in split screen (co-op,
+      counter-op and multiplayer), each view its own. By joshuarwood.
+
+  Options > Extended > Audio
+    5.1 Surround Output [On]
+      With the game's Sound option set to Surround and a 5.1 (or larger)
+      speaker setup, the game outputs real 5.1. The line below it shows what
+      is being output.
+    Levels...
+      A volume for each speaker (Front Left, Front Right, Centre, Subwoofer,
+      Rear Left, Rear Right), 0 to 150%.
+    Speaker Test
+      Plays a sound from each speaker in turn.
+    These are greyed out on a stereo device.
+
+  Dolby Surround
+    With stereo speakers or headphones and the game's Sound option on
+    Surround, the sound is Dolby Surround encoded as on the N64, for a Dolby
+    Pro Logic receiver. There's no setting: it follows the Sound option.
+  Options > Audio > Surround Setup
+    A shortcut to the 5.1 settings, shown while Sound is set to Surround.
+
+
+8. THE DEADLY PUNCH CHEAT
+-------------------------
+  A new cheat, unlocked like Hurricane Fists (Extraction on Agent in under
+  2:03), and switched on in the Cheats menu like any other. Your punches
+  kill instead of dizzying or knocking guards out (from behind too), throw
+  bodies hard and occasionally split a body at the waist. The gun-disarm move
+  stays a knockout.
+
+
+9. SETTINGS ONLY IN PD.INI
+--------------------------
+  A few settings have no menu entry. Change them in pd.ini, in [Game],
+  [Ragdoll] or [Video], while the game isn't running. (All the ragdoll
+  settings are in [Ragdoll]; a pd.ini from an earlier build that has them
+  under [Game] is still read, and they're moved the next time it's saved.)
+
+  [Game]
+    WitnessFieldOfView=1
+      1: guards only notice a death within their field of view.
+      0: anywhere they have a line of sight (the original).
+
+  [Ragdoll]
+    RagdollDeathCamControl=1
+      0 turns off the twitching and looking while dead.
+    RagdollSlopeGrip=0.70
+      How well bodies hold on slopes (0 to 1.5). 0.70 holds them on slopes
+      up to about 35 degrees; higher holds them on steeper ones. 0 lets them
+      slide on almost any slope.
+    RagdollGlassBreakSpeed=420
+      How fast a body must hit normal glass to break it.
+    RagdollDeadlyPunchPushScale=3.0
+      How hard Deadly Punch throws bodies.
+    RagdollScreamAirTime=1.5
+      Seconds a body (a fresh death, one sent flying within 2 s of first
+      coming to rest, or a knocked-out guard) must be in the air, flying or
+      falling, before it screams, counted once it's free of its death
+      animation. 0: never. 1 in 100 of the
+      men's screams is data/sounds/scream.wav (keep it with the game;
+      without it they use the game's cries only).
+    ClipMaxCatchFall=600
+      With accurate player collision: a drawn floor further below than this (from
+      where a fall began) doesn't catch you, so pits stay deadly.
+    ClipRenderFloors=1, ClipRenderCeilings=1, ClipRenderWalls=1
+      Which kinds of drawn surfaces accurate collision uses.
+    TickRateDivisor
+      The port's own setting. 0 runs the game logic at your frame rate (see
+      section 10).
+
+  [Video]
+    ShinyAlphaFloor=255
+      How solid shiny room surfaces stay in the dark (255 = solid, 0 = the
+      original fade).
+
+
+10. HIGH FRAME RATES
+--------------------
+  With the port's TickRateDivisor set to 0 the game runs at your monitor's
+  frame rate. This build fixes the problems that caused: guards stuck on
+  patrol or moving at the wrong speed, levels that didn't end, scripted
+  scenes breaking, weapons firing too fast or too slow, explosions doing
+  too little damage, smoke trails, lightning, sounds playing too fast and
+  more. Everything should behave as it does at 60 FPS.
+
+
+11. CO-OP AND MULTIPLAYER
+-------------------------
+  - Co-op and Counter-Operative get ragdolls, both death cameras, and the
+    full single player effects.
+  - The Combat Simulator uses the game's own collision for players.
+
+
+12. PROBLEMS AND CRASH LOGS
+---------------------------
+  - If the game crashes, it writes pd.crash-<date>-<time>.log (and
+    pd.crash.log) next to the exe. Please send it, together with pd.log from
+    run_with_log.bat.
+  - If the game runs slowly with lots of bodies, lower Max Simulated Bodies.
+  - To play as close to the original as possible: Ragdolls off (Player
+    Collision is on Vanilla by default) and WitnessFieldOfView=0 in pd.ini.
+    Blood still wraps round corners.
+
+  Based on the Perfect Dark PC port by fgsfdsfgs and contributors, with the
+  shiny surface fix by murkantor and the light fixes by joshuarwood.
+  Ragdoll physics use Jolt Physics.

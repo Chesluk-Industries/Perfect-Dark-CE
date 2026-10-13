@@ -15,6 +15,12 @@
 #ifndef PLATFORM_N64
 #include "video.h" // MOD: Video.UnlimitedDecals
 #endif
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
+#ifdef PD_CLIPCHECK
+#include "clipcheck.h" // MOD: clipping checks
+#endif
 
 /**
  * This file handles memory usage for graphics related tasks.
@@ -120,6 +126,12 @@ void gfxReset(void)
 		u32 gfxsize = g_GfxSizesByPlayerCount[PLAYERCOUNT() - 1];
 		u32 vtxsize = g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1];
 
+#ifdef PD_PHYSICS
+		if (g_RagdollsEnabled) {
+			gfxsize += RD_EXTRA_GFX_RAGDOLLS;
+			vtxsize += RD_EXTRA_VTX_RAGDOLLS;
+		}
+#endif
 
 #ifndef PLATFORM_N64
 		if (g_UnlimitedDecals) {
@@ -128,6 +140,13 @@ void gfxReset(void)
 		}
 #endif
 
+#ifdef PD_CLIPCHECK
+		// MOD: clipping checks - the collision debug view draws a lot
+		if (g_ClipDebug) {
+			gfxsize += 1024 * 1024;
+			vtxsize += 512 * 1024;
+		}
+#endif
 
 		// %d Players : Allocating %d bytes for master dl's\n
 		g_GfxBuffers[0] = mempAlloc(gfxsize * NUM_GFXTASKS, MEMPOOL_STAGE);

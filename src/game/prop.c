@@ -7,6 +7,10 @@
 #include "game/dlights.h"
 #include "game/chr.h"
 #include "game/prop.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#include "game/cheats.h" // MOD: Deadly Punch
+#endif
 #ifndef PLATFORM_N64
 #include "game/lv.h" // MOD: sparks - LV_STEP240
 #endif
@@ -1257,6 +1261,49 @@ void hitCreate(struct shotdata *shotdata, struct prop *prop, f32 hitdistance, s3
 	}
 }
 
+#ifdef PD_PHYSICS
+// MOD: Deadly Punch - the cheat's punch: the most damage there is, breaks
+// objects too, and lands with a small boom over the usual hit sound
+#define DEADLYPUNCH_CHRDAMAGE 1000.0f
+#define DEADLYPUNCH_OBJDAMAGE 1000.0f
+#define DEADLYPUNCH_BOOMSOUND 0x8099 // the smallest explosion's sound
+
+static void deadlyPunchBoom(struct prop *prop)
+{
+	psCreate(NULL, NULL, DEADLYPUNCH_BOOMSOUND, -1, -1, 0, 0, PSTYPE_NONE, &prop->pos, -1.0f, prop->rooms, -1, -1.0f, -1.0f, -1.0f);
+}
+
+// An object punched: the hit-surface sound of the texture under the
+// crosshair (what a bullet plays after its ricochet), found the way shots
+// find it (propobj.c), or the default surface's if none is found
+static void deadlyPunchSurfaceSound(struct prop *prop, struct model *model, struct coord *gunpos2d, struct coord *gundir2d)
+{
+	struct surfacetype *type = g_SurfaceTypes[0];
+	struct modelnode *node = NULL;
+	struct modelnode *node2 = NULL;
+	struct hitthing hitthing;
+	s32 mtxindex;
+	s32 hitpart;
+
+	do {
+		hitpart = modelTestForHit(model, gunpos2d, gundir2d, &node);
+
+		if (hitpart > 0 && func0f0849dc(model, node, gunpos2d, gundir2d, &hitthing, &mtxindex, &node2)) {
+			if (hitthing.texturenum >= 0 && hitthing.texturenum < NUM_TEXTURES
+					&& g_Textures[hitthing.texturenum].soundsurfacetype < ARRAYCOUNT(g_SurfaceTypes)) {
+				type = g_SurfaceTypes[g_Textures[hitthing.texturenum].soundsurfacetype];
+			}
+
+			break;
+		}
+	} while (hitpart > 0);
+
+	if (type && type->numsounds > 0) {
+		psCreate(NULL, NULL, type->sounds[rngRandom() % type->numsounds], -1, -1, 0, 0, PSTYPE_NONE, &prop->pos, -1.0f, prop->rooms, -1, -1.0f, -1.0f, -1.0f);
+	}
+}
+
+#endif
 void handInflictMeleeDamage(s32 handnum, struct gset *gset, bool arg2)
 {
 	s32 cdtypes;
@@ -1313,6 +1360,17 @@ void handInflictMeleeDamage(s32 handnum, struct gset *gset, bool arg2)
 			if (arg2) {
 				isglass = false;
 			}
+#ifdef PD_PHYSICS
+
+			// MOD: Deadly Punch - any object can be punched (it goes the
+			// glass's way: a hit on its model, then gunfire damage)
+			bool deadlyobj = false;
+
+			if (!arg2 && !isglass && prop->type == PROPTYPE_OBJ && obj && obj->model && cheatIsDeadlyPunch(gset)) {
+				deadlyobj = true;
+				isglass = true;
+			}
+#endif
 
 			if (prop->type == PROPTYPE_CHR
 					|| (prop->type == PROPTYPE_PLAYER && prop->chr && playermgrGetPlayerNumByProp(prop) != g_Vars.currentplayernum)
@@ -1371,8 +1429,23 @@ void handInflictMeleeDamage(s32 handnum, struct gset *gset, bool arg2)
 							if (modelTestForHit(model, &gunpos2d, &gundir2d, &node) > 0) {
 								f32 damage = gsetGetDamage(gset) * 2.5f;
 								skipthething = true;
+#ifdef PD_PHYSICS
+								if (cheatIsDeadlyPunch(gset)) {
+									damage = DEADLYPUNCH_OBJDAMAGE;
+									deadlyPunchBoom(prop);
+								}
+
+								// (an object: the hit-surface sound and the boom, not the
+								// bullet ricochets bgunPlayPropHitSound picks for objects)
+								if (deadlyobj) {
+									deadlyPunchSurfaceSound(prop, model, &gunpos2d, &gundir2d);
+								} else
+#endif
 								bgunPlayGlassHitSound(&playerprop->pos, playerprop->rooms, -1);
 								objTakeGunfire(obj, damage, &prop->pos, gset->weaponnum, g_Vars.currentplayernum);
+#ifdef PD_PHYSICS
+								if (!deadlyobj)
+#endif
 								objDropRecursively(prop, false);
 							}
 						} else if (arg2) {
@@ -1403,6 +1476,17 @@ void handInflictMeleeDamage(s32 handnum, struct gset *gset, bool arg2)
 									hitpart = HITPART_TORSO;
 								}
 
+#ifdef PD_PHYSICS
+								// MOD: ragdoll physics - Deadly Punch punches knock bodies about
+								ragdollOnChrPunched(chr, hitpart, &gundir2d, gset);
+
+								// MOD: Deadly Punch - all the damage there is, and a boom
+								if (cheatIsDeadlyPunch(gset)) {
+									deadlyPunchBoom(prop);
+									func0f0341dc(chr, DEADLYPUNCH_CHRDAMAGE, &gundir2d, gset,
+											g_Vars.currentplayer->prop, hitpart, chr->prop, node, model, side, 0);
+								} else
+#endif
 								func0f0341dc(chr, gsetGetDamage(gset), &gundir2d, gset,
 										g_Vars.currentplayer->prop, hitpart, chr->prop, node, model, side, 0);
 							}
@@ -1457,12 +1541,27 @@ void handTickAttack(s32 handnum)
 				mpstatsIncrementPlayerShotCount2(&gset, 0);
 
 				if (weaponnum == WEAPON_SHOTGUN) {
+#ifdef PD_PHYSICS
+					// MOD: ragdoll physics - a limb only comes off if every
+					// pellet of the shot hits it
+					s32 pellet;
+
+					ragdollShotgunVolleyBegin();
+
+					for (pellet = 0; pellet < 6; pellet++) {
+						ragdollShotgunPellet();
+						shotCreate(handnum, true, true, 1, true);
+					}
+
+					ragdollShotgunVolleyEnd();
+#else
 					shotCreate(handnum, true, true, 1, true);
 					shotCreate(handnum, true, true, 1, true);
 					shotCreate(handnum, true, true, 1, true);
 					shotCreate(handnum, true, true, 1, true);
 					shotCreate(handnum, true, true, 1, true);
 					shotCreate(handnum, true, true, 1, true);
+#endif
 				} else {
 					shotCreate(handnum, true, true, bgunGetShotsToTake(handnum), g_Vars.mplayerisrunning);
 				}
@@ -1472,10 +1571,26 @@ void handTickAttack(s32 handnum)
 			break;
 		case HANDATTACKTYPE_MELEE:
 			chrUncloakTemporarily(g_Vars.currentplayer->prop->chr);
+#ifdef PD_PHYSICS
+			ragdollMeleeAttackBegin(); // MOD: ragdoll physics - Reaper blades cut, its bullets don't
+#endif
 			handInflictMeleeDamage(handnum, &gset, false);
+#ifdef PD_PHYSICS
+			ragdollMeleeAttackEnd();
+
+			if (weaponnum == WEAPON_REAPER) {
+				ragdollReaperGrind(); // MOD: ragdoll physics - and bodies
+			}
+#endif
 			break;
 		case HANDATTACKTYPE_MELEENOUNCLOAK:
+#ifdef PD_PHYSICS
+			ragdollMeleeAttackBegin(); // MOD: ragdoll physics
+#endif
 			handInflictMeleeDamage(handnum, &gset, true);
+#ifdef PD_PHYSICS
+			ragdollMeleeAttackEnd();
+#endif
 			break;
 		case HANDATTACKTYPE_DETONATE:
 			playerActivateRemoteMineDetonator(g_Vars.currentplayernum);
@@ -2980,6 +3095,15 @@ bool propIsOfCdType(struct prop *prop, u32 types)
 					|| (chr->hidden & CHRHFLAG_PERIMDISABLED)) {
 				result = false;
 			}
+#ifdef PD_PHYSICS
+
+			// MOD: ragdoll physics - a ragdoll stays ACT_DIE until it settles,
+			// and a dying chr's standing cylinder stopped shots where the body
+			// had been: to the game a ragdoll is as a dead chr
+			if (result && chr->actiontype == ACT_DIE && ragdollIsChrRagdolled(chr)) {
+				result = false;
+			}
+#endif
 		}
 	} else if (prop->type == PROPTYPE_OBJ || prop->type == PROPTYPE_WEAPON) {
 		struct defaultobj *obj = prop->obj;

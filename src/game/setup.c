@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 #include "game/cheats.h"
 #include "game/game_00b820.h"
 #include "game/setup.h"
@@ -1397,6 +1400,9 @@ void setupLoadFiles(s32 stagenum)
 
 		// Count the number of chrs and objects so enough model slots can be allocated
 		numchrs += setupCountCommandType(OBJTYPE_CHR);
+#ifdef PD_PHYSICS
+		numchrs += ragdollGetExtraChrSlots(); // MOD: ragdoll physics - room for more corpses/test spawns
+#endif
 
 		if (!g_Vars.normmplayerisrunning && g_MissionConfig.iscoop && g_Vars.numaibuddies > 0) {
 			// @bug? The Hotshot buddy has two guns, but only one is counted here.
@@ -1533,6 +1539,9 @@ void setupCreateProps(s32 stagenum)
 			s32 numchrs = 0;
 
 			numchrs += setupCountCommandType(OBJTYPE_CHR);
+#ifdef PD_PHYSICS
+			numchrs += ragdollGetExtraChrSlots(); // MOD: ragdoll physics
+#endif
 
 			if (g_Vars.normmplayerisrunning == false
 					&& g_MissionConfig.iscoop

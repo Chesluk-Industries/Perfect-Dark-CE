@@ -13155,6 +13155,13 @@ Gfx *bgunDrawHud(Gfx *gdl)
 
 			str = langGet(ctrl->curfnstr);
 
+#ifdef PD_PHYSICS
+			// MOD: Deadly Punch - the punch goes by the cheat's name (the disarm keeps its own)
+			if (ctrl->curfnstr == L_GUN_100 && hand->gset.weaponnum == WEAPON_UNARMED && cheatIsActive(CHEAT_DEADLYPUNCH)) {
+				str = "Deadly Punch\n";
+			}
+
+#endif
 			if (ctrl->fnstrtimer < 255) {
 				if (ctrl->fnstrtimer + g_Vars.lvupdate60 > 255) {
 					ctrl->fnstrtimer = 255;

@@ -1,0 +1,100 @@
+SOURCE GUIDE: WHAT IS WHAT
+==========================
+
+This build changes the Perfect Dark PC port (fgsfdsfgs/perfect_dark, branch
+"port", commit 32a1cb9f2) in three kinds of way:
+
+  F  FIXES
+     The port now behaves, looks or sounds as the original game does. Most
+     are high frame rate fixes: game logic that ran once per frame (tick)
+     instead of once per 60th of a second, so above 60 FPS things ran too
+     fast, too slow, or stepped. At 60 FPS these are unchanged. Also
+     rendering bugs of the port and the N64's Dolby Surround.
+
+  N  NON-VANILLA
+     Changes from the original game that aren't part of the ragdoll module:
+     improvements and new options (5.1 output, unlimited decals, decals
+     clamped to their surface, full effects in co-op, light glares in split
+     screen, more sounds at once, crash logs) and two bugs of the original game fixed (the knockout fix
+     and the roll fix).
+
+  R  RAGDOLL / PHYSICS
+     The ragdoll module and everything built on it: ragdolls,
+     dismemberment, grabbing bodies, bodies as cover, guards reacting to
+     bodies, the death camera, Deadly Punch, blood that wraps round corners,
+     and the accurate collision (collision from the level as it's drawn).
+
+
+WHERE TO FIND THEM
+------------------
+In the code
+  - Every change carries a comment "MOD: <tag>". tools/mod_categories.txt
+    gives each tag's category (F, N or R) and what it is.
+  - Ragdoll / physics code is inside #ifdef PD_PHYSICS (the accurate
+    collision inside #ifdef PD_CLIPCHECK). Code outside those blocks is F or
+    N.
+  - Port-only code is inside #ifndef PLATFORM_N64: the N64 build is unchanged.
+  - Files that are R only: physics/, port/src/ragdoll.c, port/src/ragdoll/,
+    port/src/clipcheck.c, port/src/clipcheck/, port/src/bloodwrap.c,
+    port/include/ragdoll.h, port/include/clipcheck.h, and port/data/ (the
+    ragdolls' sound files, copied to the game's data folder by
+    build_windows.sh).
+
+In a release's source folder
+  - CHANGED_FILES.txt: each new or modified file with the kinds of change in
+    it (F, N, R).
+  - MOD_INDEX.txt: each tag, its category, what it is and the files it's in.
+  - patches/fixes.patch: upstream -> F + N (builds without the ragdoll module).
+  - patches/ragdoll.patch: F + N -> F + N + R (the full source).
+  - patches/README.txt: how to apply and build them.
+
+
+THE FIXES (F), BY AREA
+----------------------
+High frame rates (above 60 FPS, as at 60)
+  Guards (patrols, spotting you, cover, dice rolls, burst fire, stairs,
+  uncloaking, pushes), levels ending properly, WAR! teams, Extraction's
+  scripted walk, explosions' lasting damage, turrets, the helicopter and
+  drone guns, smoke trails, homing rockets, lightning, sun glare, the combat
+  boost, slow motion, the IR scanner, the CamSpy, the teleport effect,
+  strafing, leaning, door jams, weather, shield shimmer, Dr. Caroll's faces,
+  footstep and other sounds, menu transitions and the end credits. The gun,
+  Skedar leaps and other motion move smoothly every frame instead of in 60th
+  steps.
+Rendering
+  Shiny surfaces in the dark (by murkantor), rock textures that must be
+  solid, texture tile widths. Lights (by joshuarwood, from his pull
+  requests to the PC port): the gun blocks light glares (#714), lights
+  restored by patching the level files at start-up (#722), glares through
+  grated doors (#735).
+Audio
+  Dolby Surround in stereo with Sound on Surround, as on the N64.
+Stability
+  Menus that could write past their arrays; pd.ini settings past the 300th
+  being dropped.
+
+
+THE NON-VANILLA CHANGES (N)
+---------------------------
+  Can be turned off (Options > Extended):
+    Unlimited Decals (Video), Clamp Decals to Edges (Video), Splitscreen
+    Light Glares (Video, by joshuarwood, #760), 5.1 Surround Output (Audio).
+  Always on:
+    The knockout fix (a guard hit while going down stays down), the roll fix
+    (guards' roll animations no longer swing through wrong poses), full
+    effects in co-op and counter-op, more sounds at once, smooth panning,
+    crash logs, GUI texture filtering off by default.
+
+
+THE RAGDOLL / PHYSICS CHANGES (R)
+---------------------------------
+  Options > Extended > Physics > Ragdolls off turns off the ragdolls and
+  everything that needs them (grabbing, bodies as cover, guards reacting to
+  bodies, the death camera). The accurate player collision is off by default
+  (Physics > Debug > Player Collision). Deadly Punch is a cheat, off unless
+  you turn it on.
+  Still on with Ragdolls off:
+    - blood that wraps round corners;
+    - the witness field of view: guards only notice a death they could see
+      happen (an AI change made for the body reactions); pd.ini
+      WitnessFieldOfView=0 turns it off.

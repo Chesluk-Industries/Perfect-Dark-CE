@@ -7,7 +7,8 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
   else()
     # SDL2 requires at least this version for everything to work properly.
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.9" CACHE STRING "Minimum OS X deployment version")
+    # MOD: ragdoll physics - Jolt needs std::shared_mutex (10.12) and aligned new (10.13)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment version")
   endif()
 endif()
 
@@ -28,6 +29,83 @@ if (NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
   if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "" FORCE)
   endif()
+endif()
+
+# MOD: ragdoll physics (Jolt)
+# Jolt is configured here, before the game's global compile flags and
+# definitions below, so it builds with clean flags. The C++ wrapper is a
+# separate static library (pd_physics) for the same reason.
+
+option(PD_PHYSICS "Build with Jolt physics (ragdolls)" ON)
+
+if(PD_PHYSICS)
+  # Looked for in ../../_sources/JoltPhysics-master, then ../../JoltPhysics-master
+  get_filename_component(JOLT_DIR_DEFAULT "${CMAKE_SOURCE_DIR}/../../_sources/JoltPhysics-master" ABSOLUTE)
+  if(NOT EXISTS "${JOLT_DIR_DEFAULT}/Build/CMakeLists.txt")
+    get_filename_component(JOLT_DIR_DEFAULT "${CMAKE_SOURCE_DIR}/../../JoltPhysics-master" ABSOLUTE)
+  endif()
+  set(JOLT_DIR "${JOLT_DIR_DEFAULT}" CACHE PATH "Path to a local JoltPhysics source tree (downloaded if there's none)")
+
+  # A build folder made before Jolt was moved remembers the old place
+  if(NOT EXISTS "${JOLT_DIR}/Build/CMakeLists.txt" AND EXISTS "${JOLT_DIR_DEFAULT}/Build/CMakeLists.txt")
+    message(STATUS "Physics: Jolt not at ${JOLT_DIR} any more, using ${JOLT_DIR_DEFAULT}")
+    set(JOLT_DIR "${JOLT_DIR_DEFAULT}" CACHE PATH "Path to the JoltPhysics source tree" FORCE)
+  endif()
+
+  # No local copy: download the release this build is tested with (needs git)
+  set(PD_JOLT_TAG "v5.6.0" CACHE STRING "Jolt Physics release downloaded when there's no local copy")
+
+  if(EXISTS "${JOLT_DIR}/Build/CMakeLists.txt")
+    set(PD_JOLT_SOURCE "${JOLT_DIR}")
+  else()
+    message(STATUS "Physics: no local Jolt at ${JOLT_DIR}, downloading Jolt ${PD_JOLT_TAG}")
+    include(FetchContent)
+    if(POLICY CMP0169)
+      cmake_policy(SET CMP0169 OLD) # FetchContent_Populate: Jolt is added below with its own options
+    endif()
+    FetchContent_Declare(joltphysics
+      GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+      GIT_TAG ${PD_JOLT_TAG}
+      GIT_SHALLOW TRUE)
+    FetchContent_GetProperties(joltphysics)
+    if(NOT joltphysics_POPULATED)
+      FetchContent_Populate(joltphysics)
+    endif()
+    set(PD_JOLT_SOURCE "${joltphysics_SOURCE_DIR}")
+  endif()
+
+  if(NOT EXISTS "${PD_JOLT_SOURCE}/Build/CMakeLists.txt")
+    message(FATAL_ERROR "JoltPhysics not found at ${PD_JOLT_SOURCE}. Set -DJOLT_DIR=... or -DPD_PHYSICS=OFF")
+  endif()
+
+  # Jolt options: plain static library, no extras, conservative CPU features
+  set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+  set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+  set(GENERATE_DEBUG_SYMBOLS OFF CACHE BOOL "" FORCE)
+  set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+  set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+  set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+  set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+  set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
+  set(USE_AVX OFF CACHE BOOL "" FORCE)
+  set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+  set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+  set(USE_LZCNT OFF CACHE BOOL "" FORCE)
+  set(USE_TZCNT OFF CACHE BOOL "" FORCE)
+  set(USE_F16C OFF CACHE BOOL "" FORCE)
+  set(USE_FMADD OFF CACHE BOOL "" FORCE)
+
+  add_subdirectory("${PD_JOLT_SOURCE}/Build" "${CMAKE_BINARY_DIR}/jolt" EXCLUDE_FROM_ALL)
+
+  # Own directory scope, so none of the game's definitions/flags reach it
+  add_subdirectory(physics)
+
+  message(STATUS "Physics: Jolt from ${PD_JOLT_SOURCE}")
 endif()
 
 # Options
@@ -149,6 +227,18 @@ add_definitions(
 
 if(TARGET_IS_64BIT)
   add_definitions(-DPLATFORM_64BIT=1)
+endif()
+
+# MOD: ragdoll physics
+if(PD_PHYSICS)
+  add_definitions(-DPD_PHYSICS=1)
+  include_directories("${CMAKE_SOURCE_DIR}/physics")
+endif()
+
+# MOD: clipping checks - drawn floors/ceilings for player clipping (port/src/clipcheck.c, needs PD_PHYSICS)
+option(PD_CLIPCHECK "Clipping checks against the level's render geometry" ON)
+if(PD_CLIPCHECK AND PD_PHYSICS)
+  add_definitions(-DPD_CLIPCHECK=1)
 endif()
 
 # Compiler flags
@@ -344,6 +434,12 @@ set(BIN_NAME "pd${BIN_REGION}.${TARGET_ARCH}")
 add_executable(pd ${SRC})
 add_dependencies(pd pd_headers)
 target_link_libraries(pd ${LIBS})
+if(PD_PHYSICS)
+  target_link_libraries(pd pd_physics) # MOD: ragdoll physics
+  if(WIN32)
+    target_link_libraries(pd pthread) # MOD: ragdoll physics - the physics step's worker threads
+  endif()
+endif()
 set_target_properties(pd PROPERTIES OUTPUT_NAME "${BIN_NAME}")
 if(WIN32)
   set_target_properties(pd PROPERTIES WIN32_EXECUTABLE TRUE)

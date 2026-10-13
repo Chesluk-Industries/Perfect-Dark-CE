@@ -1,0 +1,5 @@
+# MOD: ragdoll physics - C wrapper around Jolt (see pdphysics.h)
+add_library(pd_physics STATIC pdphysics.cpp)
+target_include_directories(pd_physics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(pd_physics PRIVATE Jolt)
+set_target_properties(pd_physics PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

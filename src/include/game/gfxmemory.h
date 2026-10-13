@@ -15,5 +15,8 @@ Col *gfxAllocateColours(s32 count);
 void *gfxAllocate(u32 size);
 void gfxSwapBuffers(void);
 s32 gfxGetFreeGfx(Gfx *gdl);
+#ifdef PD_PHYSICS
+u32 gfxGetFreeVtx(void); // MOD: ragdoll physics (was missing)
+#endif
 
 #endif

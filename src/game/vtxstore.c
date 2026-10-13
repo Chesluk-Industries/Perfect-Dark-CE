@@ -11,6 +11,9 @@
 #include "lib/rng.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
 
 const char var7f1b5230[] = "VTXSTORE : vtxfixrefs -> Start - p1=%x, p2=%x\n";
 const char var7f1b5260[] = "vtxfixrefs : Part=%x -- Mapping ptr %x -> %x\n";
@@ -186,7 +189,12 @@ void *vtxstoreAllocate(s32 count, s32 index, struct modelnode *node, s32 level)
 				&& chr->prop
 				&& (chr->prop->flags & PROPFLAG_ONANYSCREENPREVTICK) == 0
 				&& chr->actiontype == ACT_DEAD
+#ifdef PD_PHYSICS
+				&& chr->act_dead.fadewheninvis == false
+				&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - never reap ragdoll corpses
+#else
 				&& chr->act_dead.fadewheninvis == false) {
+#endif
 			if (tally < 6) {
 				chrs[tally] = chr;
 				tally++;
