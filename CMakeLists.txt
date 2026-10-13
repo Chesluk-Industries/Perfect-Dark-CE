@@ -102,6 +102,19 @@ if(PD_PHYSICS)
 
   add_subdirectory("${PD_JOLT_SOURCE}/Build" "${CMAKE_BINARY_DIR}/jolt" EXCLUDE_FROM_ALL)
 
+  # 32-bit Windows (MinGW): the C runtime's malloc only aligns to 8 bytes,
+  # while GCC assumes new/malloc give 16, so Jolt's SSE data (bounding boxes,
+  # bodies, shapes) landed misaligned and the 32-bit build crashed building
+  # the level collision (an access violation at ffffffff in MeshShape).
+  # -faligned-new=8 makes anything aligned to more than 8 use aligned new,
+  # Jolt is told the real alignment (its containers then ask for aligned
+  # memory), and since Windows only keeps the stack 4-byte aligned, functions
+  # realign it for SSE. (PUBLIC: the physics wrapper sees the same settings.)
+  if(WIN32 AND NOT MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    target_compile_definitions(Jolt PUBLIC JPH_DEFAULT_ALLOCATE_ALIGNMENT=8)
+    target_compile_options(Jolt PUBLIC -mstackrealign $<$<COMPILE_LANGUAGE:CXX>:-faligned-new=8>)
+  endif()
+
   # Own directory scope, so none of the game's definitions/flags reach it
   add_subdirectory(physics)
 
