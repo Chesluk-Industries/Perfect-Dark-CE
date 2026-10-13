@@ -41,6 +41,7 @@ This fork provides updates to the main PC port for general stability and new fea
 **The following platforms are officially supported and tested:**
 * Windows 32-bit, 64-bit
 * Linux 32-bit, 64-bit
+
 macOS should work as well, but it is currently untested.
 
 ## Demo
