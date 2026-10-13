@@ -2742,6 +2742,16 @@ bool aiIfChrShieldLessThan(void)
 	f32 value = (cmd[4] | (cmd[3] << 8)) * 0.1f;
 	struct chrdata *chr = chrFindById(g_Vars.chrdata,cmd[2]);
 
+#ifndef PLATFORM_N64
+	// MOD: shield check fix - an empty shield on a chr that hasn't run its AI
+	// list yet doesn't count: it may not have been given one yet (at high frame
+	// rates Extraction's "Dr. Caroll is under attack!" fired at the start)
+	if (chr && chr->ailist && chr->aioffset == 0 && chrGetShield(chr) <= 0) {
+		g_Vars.aioffset = g_Vars.aioffset + 6;
+		return false;
+	}
+#endif
+
 	if (chr && chrGetShield(chr) < value) {
 		g_Vars.aioffset = chraiGoToLabel(g_Vars.ailist, g_Vars.aioffset, cmd[5]);
 	} else {
@@ -9578,6 +9588,15 @@ bool aiChrEmitSparks(void)
 /**
  * @cmd 01d3
  */
+#ifndef PLATFORM_N64
+// MOD: Dr Caroll's faces - change every 4 60ths (7) or every 60th (8), not frames
+#define DRCAROLL_EVERY4TH() LV_STEP240(16)
+#define DRCAROLL_EVERY() LV_STEP240(4)
+#else
+#define DRCAROLL_EVERY4TH() ((g_Vars.lvframenum % 4) == 2)
+#define DRCAROLL_EVERY() true
+#endif
+
 bool aiSetDrCarollImages(void)
 {
 	u8 *cmd = g_Vars.ailist + g_Vars.aioffset;
@@ -9585,21 +9604,25 @@ bool aiSetDrCarollImages(void)
 
 	if (drcaroll) {
 		if (cmd[4] == 7) {
-			if ((g_Vars.lvframenum % 4) == 2) {
+			if (DRCAROLL_EVERY4TH()) {
 				drcaroll->drcarollimage_left = rngRandom() % 6;
 			}
 		} else if (cmd[4] == 8) {
-			drcaroll->drcarollimage_left = rngRandom() % 6;
+			if (DRCAROLL_EVERY()) {
+				drcaroll->drcarollimage_left = rngRandom() % 6;
+			}
 		} else {
 			drcaroll->drcarollimage_left = cmd[4];
 		}
 
 		if (cmd[3] == 7) {
-			if ((g_Vars.lvframenum % 4) == 2) {
+			if (DRCAROLL_EVERY4TH()) {
 				drcaroll->drcarollimage_right = rngRandom() % 6;
 			}
 		} else if (cmd[3] == 8) {
-			drcaroll->drcarollimage_right = rngRandom() % 6;
+			if (DRCAROLL_EVERY()) {
+				drcaroll->drcarollimage_right = rngRandom() % 6;
+			}
 		} else {
 			drcaroll->drcarollimage_right = cmd[3];
 		}

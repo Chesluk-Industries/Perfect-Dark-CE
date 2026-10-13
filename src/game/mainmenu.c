@@ -2388,6 +2388,11 @@ struct menudialogdef g_CiControlStylePlayer2MenuDialog = {
 	NULL,
 };
 
+#ifndef PLATFORM_N64
+// MOD: surround 5.1 - shortcut to the surround settings (port/src/optionsmenu.c)
+MenuItemHandlerResult menuhandlerSurroundSetup(s32 operation, struct menuitem *item, union handlerdata *data);
+#endif
+
 struct menuitem g_AudioOptionsMenuItems[] = {
 	{
 		MENUITEMTYPE_SLIDER,
@@ -2429,6 +2434,16 @@ struct menuitem g_AudioOptionsMenuItems[] = {
 		L_MPWEAPONS_218, // "Language Filter"
 		0,
 		menuhandlerLangFilter,
+	},
+#endif
+#ifndef PLATFORM_N64
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Surround Setup\n",
+		0,
+		menuhandlerSurroundSetup, // MOD: surround 5.1 (only while Sound is Surround)
 	},
 #endif
 	{

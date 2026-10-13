@@ -1,4 +1,15 @@
 #include "n_synthInternals.h"
+
+#ifndef PLATFORM_N64
+/**
+ * MOD: smooth panning - a pan change jumped the volume (the new envelope
+ * segment started from an estimate, ramped over the last volume change's
+ * length, usually 0): it now starts from the volume the mixer reached
+ * (port/src/mixer.c) and ramps over at least ENV_PAN_RAMP samples.
+ */
+#define ENV_PAN_RAMP (FIXED_SAMPLE * 2) // ~17 ms at 22020 Hz
+int mixerEnvGetVolume(void *state, s16 *left, s16 *right);
+#endif
 #include <os.h>
 #include <math.h>
 
@@ -147,6 +158,19 @@ Acmd *n_alEnvmixerPull(N_PVoice *filter, s32 sampleOffset, Acmd *p)
 				e->em_cvolR = 1;
 			}
 
+#ifndef PLATFORM_N64
+			// MOD: smooth panning - from where the mixer's ramp actually got to
+			// (not before this voice has been mixed: em_first)
+			if (!e->em_first) {
+				s16 l, r;
+
+				if (mixerEnvGetVolume(e->em_state, &l, &r)) {
+					e->em_cvolL = l > 0 ? l : 1;
+					e->em_cvolR = r > 0 ? r : 1;
+				}
+			}
+#endif
+
 			if (e->em_ctrlList->type == AL_FILTER_SET_PAN) {
 				/*
 				 * This should result in a change to the current
@@ -159,6 +183,17 @@ Acmd *n_alEnvmixerPull(N_PVoice *filter, s32 sampleOffset, Acmd *p)
 				} else {
 					e->em_pan = (s16) e->em_ctrlList->data.i;
 				}
+
+#ifndef PLATFORM_N64
+				// MOD: smooth panning - ramp to the new pan over the rest of the
+				// current volume change, or at least ENV_PAN_RAMP samples
+				{
+					s32 remaining = e->em_segEnd - e->em_delta;
+
+					e->em_delta = 0;
+					e->em_segEnd = remaining > ENV_PAN_RAMP ? remaining : ENV_PAN_RAMP;
+				}
+#endif
 			}
 
 			if (e->em_ctrlList->type == AL_FILTER_SET_VOLUME) {

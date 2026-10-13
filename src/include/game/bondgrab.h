@@ -20,7 +20,11 @@ void bgrabUpdatePrevPos(void);
 void bgrab0f0ce178(void);
 void bgrabUpdateVertical(void);
 void bgrabHandleActivate(void);
+#ifndef PLATFORM_N64
+void bgrabUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, f32 mult); // MOD: high framerates (60ths, fractional)
+#else
 void bgrabUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, s32 mult);
+#endif
 void bgrabUpdateSpeedForwards(f32 target, f32 speed);
 void bgrabApplyMoveData(struct movedata *data);
 void bgrabUpdateSpeedTheta(void);

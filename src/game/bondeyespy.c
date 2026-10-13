@@ -437,9 +437,19 @@ void eyespyUpdateVertical(void)
 	origpos.f[1] = prop->pos.y;
 	origpos.f[2] = prop->pos.z;
 
+#ifndef PLATFORM_N64
+	// MOD: high framerates - the camspy's velocities are kept per 60th of a
+	// second (they were per frame, with per-frame damping and per-frame
+	// caps scaled by the frame's length, so above 60 FPS it sped up and
+	// coasted 4x as fast at 240 FPS). It moves by velocity x time.
+	dist.x = g_Vars.currentplayer->eyespy->vel.x * g_Vars.lvupdate60freal;
+	dist.y = 0;
+	dist.z = g_Vars.currentplayer->eyespy->vel.z * g_Vars.lvupdate60freal;
+#else
 	dist.x = g_Vars.currentplayer->eyespy->vel.x;
 	dist.y = 0;
 	dist.z = g_Vars.currentplayer->eyespy->vel.z;
+#endif
 
 	if (eyespy0f0cfdd0(&dist, &spac, &spa0) == CDRESULT_COLLISION) {
 		if (eyespy0f0cf890(&dist, &spac, &spa0, &sp60, &sp54)) {
@@ -467,6 +477,13 @@ void eyespyUpdateVertical(void)
 	newy = chr->manground;
 	newground = eyespyFindGround(NULL);
 
+#ifndef PLATFORM_N64
+	// MOD: high framerates - the fall speed grew and was applied once per
+	// frame, so at 240 FPS the camspy followed steps and ledges up to 16x as
+	// fast. Both now go by the time passed (in 60ths).
+	accel *= g_Vars.lvupdate60freal;
+#endif
+
 	if (newground != chr->manground) {
 		if (newground < chr->manground) {
 			// Descending a slope or ledge
@@ -476,7 +493,11 @@ void eyespyUpdateVertical(void)
 				g_Vars.currentplayer->eyespy->gravity += accel;
 			}
 
+#ifndef PLATFORM_N64
+			newy -= g_Vars.currentplayer->eyespy->gravity * g_Vars.lvupdate60freal;
+#else
 			newy -= g_Vars.currentplayer->eyespy->gravity;
+#endif
 
 			if (newy < newground) {
 				g_Vars.currentplayer->eyespy->gravity = 0;
@@ -490,7 +511,11 @@ void eyespyUpdateVertical(void)
 				g_Vars.currentplayer->eyespy->gravity += accel;
 			}
 
+#ifndef PLATFORM_N64
+			newy += g_Vars.currentplayer->eyespy->gravity * g_Vars.lvupdate60freal;
+#else
 			newy += g_Vars.currentplayer->eyespy->gravity;
+#endif
 
 			if (newy > newground) {
 				g_Vars.currentplayer->eyespy->gravity = 0;
@@ -515,7 +540,11 @@ void eyespyUpdateVertical(void)
 
 	// Handle rebound if hitting the min or max height
 	if (g_Vars.currentplayer->eyespy->vel.y != 0) {
+#ifndef PLATFORM_N64
+		f32 newheight = g_Vars.currentplayer->eyespy->vel.y * g_Vars.lvupdate60freal + g_Vars.currentplayer->eyespy->height; // MOD: high framerates
+#else
 		f32 newheight = g_Vars.currentplayer->eyespy->vel.y + g_Vars.currentplayer->eyespy->height;
+#endif
 		bool rebound = false;
 
 		if (newheight < g_EyespyMinHeight) {
@@ -552,6 +581,14 @@ void eyespyUpdateVertical(void)
 		dist.f[0] * dist.f[0] +
 		dist.f[1] * dist.f[1] +
 		dist.f[2] * dist.f[2];
+
+#ifndef PLATFORM_N64
+	// MOD: high framerates - the motor hum's volume comes from the (squared)
+	// distance moved this frame: per 60th, so it isn't 16x quieter at 240 FPS
+	if (g_Vars.lvupdate60freal > 0.0f) {
+		g_Vars.currentplayer->eyespy->speed /= g_Vars.lvupdate60freal * g_Vars.lvupdate60freal;
+	}
+#endif
 }
 
 bool eyespyTryLaunch(void)
@@ -892,7 +929,10 @@ void eyespyProcessInput(bool allowbuttons)
 
 	g_EyespyPickup = false;
 
-#if VERSION >= VERSION_PAL_BETA
+#ifndef PLATFORM_N64
+	// MOD: high framerates - damping per 60th of a second
+	spe0 = __builtin_powf(PAL ? 0.952f : 0.96f, g_Vars.lvupdate60freal);
+#elif VERSION >= VERSION_PAL_BETA
 	for (f = 1; f < g_Vars.lvupdate60; f++) {
 		spe0 *= PAL ? 0.952f : 0.96f;
 	}
@@ -1063,8 +1103,13 @@ void eyespyProcessInput(bool allowbuttons)
 		spcc = g_Vars.currentplayer->eyespy->velf[0] * g_Vars.currentplayer->eyespy->velf[0]
 			+ g_Vars.currentplayer->eyespy->velf[1] * g_Vars.currentplayer->eyespy->velf[1];
 
+#ifndef PLATFORM_N64
+		if (spcc > 90.25f) { // MOD: high framerates - caps per 60th
+			spcc = 9.5f / sqrtf(spcc);
+#else
 		if (spcc > 90.25f * g_Vars.lvupdate60freal * g_Vars.lvupdate60freal) {
 			spcc = 9.5f * g_Vars.lvupdate60freal / sqrtf(spcc);
+#endif
 
 			g_Vars.currentplayer->eyespy->velf[0] *= spcc;
 			g_Vars.currentplayer->eyespy->velf[1] *= spcc;
@@ -1073,8 +1118,13 @@ void eyespyProcessInput(bool allowbuttons)
 		spd4 = g_Vars.currentplayer->eyespy->vels[0] * g_Vars.currentplayer->eyespy->vels[0]
 			+ g_Vars.currentplayer->eyespy->vels[1] * g_Vars.currentplayer->eyespy->vels[1];
 
+#ifndef PLATFORM_N64
+		if (spd4 > 225.0f) { // MOD: high framerates - caps per 60th
+			spd4 = 15.0f / sqrtf(spd4);
+#else
 		if (spd4 > 225.0f * g_Vars.lvupdate60freal * g_Vars.lvupdate60freal) {
 			spd4 = 15.0f * g_Vars.lvupdate60freal / sqrtf(spd4);
+#endif
 
 			g_Vars.currentplayer->eyespy->vels[0] *= spd4;
 			g_Vars.currentplayer->eyespy->vels[1] *= spd4;
@@ -1082,6 +1132,16 @@ void eyespyProcessInput(bool allowbuttons)
 
 		g_Vars.currentplayer->eyespy->vel.y += spc4;
 
+#ifndef PLATFORM_N64
+		// MOD: high framerates - caps per 60th
+		if (g_Vars.currentplayer->eyespy->vel.y < -5) {
+			g_Vars.currentplayer->eyespy->vel.y = -5;
+		}
+
+		if (g_Vars.currentplayer->eyespy->vel.y > 5) {
+			g_Vars.currentplayer->eyespy->vel.y = 5;
+		}
+#else
 		if (g_Vars.currentplayer->eyespy->vel.y < -(5 * g_Vars.lvupdate60freal)) {
 			g_Vars.currentplayer->eyespy->vel.y = -(5 * g_Vars.lvupdate60freal);
 		}
@@ -1089,6 +1149,7 @@ void eyespyProcessInput(bool allowbuttons)
 		if (g_Vars.currentplayer->eyespy->vel.y > 5 * g_Vars.lvupdate60freal) {
 			g_Vars.currentplayer->eyespy->vel.y = 5 * g_Vars.lvupdate60freal;
 		}
+#endif
 	} else {
 		g_Vars.currentplayer->eyespy->bobactive = true;
 	}
@@ -1101,9 +1162,10 @@ void eyespyProcessInput(bool allowbuttons)
 #ifdef PLATFORM_N64
 			g_Vars.currentplayer->eyespy->vel.y += 0.025f * g_Vars.currentplayer->eyespy->bobdir;
 #else
-			// HACK: how do I scale this properly?
-			const f32 scale = (g_Vars.lvupdate60freal <= 1.1f) ? 0.0055f : 0.0125f;
-			g_Vars.currentplayer->eyespy->vel.y += scale * g_Vars.lvupdate60freal * g_Vars.currentplayer->eyespy->bobdir;
+			// MOD: high framerates - the bob's push per 60th (velocities are per
+			// 60th now): the port's 60 FPS value, by time (it replaces a guess
+			// that switched value with the frame rate)
+			g_Vars.currentplayer->eyespy->vel.y += 0.0055f * g_Vars.lvupdate60freal * g_Vars.currentplayer->eyespy->bobdir;
 #endif
 
 			if (g_Vars.currentplayer->eyespy->bobtimer > TICKS(120)) {

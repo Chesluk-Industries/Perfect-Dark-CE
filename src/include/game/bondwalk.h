@@ -18,7 +18,11 @@ s32 bwalk0f0c47d0(struct coord *a, struct coord *b, struct coord *c, struct coor
 s32 bwalk0f0c494c(struct coord *a, struct coord *b, struct coord *c, s32 types);
 s32 bwalk0f0c4a5c(struct coord *a, struct coord *b, struct coord *c, s32 types);
 void bwalk0f0c4d98(void);
+#ifndef PLATFORM_N64
+void bwalkUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, f32 mult); // MOD: high framerates (60ths, fractional)
+#else
 void bwalkUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, s32 mult);
+#endif
 void bwalkUpdateSpeedForwards(f32 targetspeed, f32 accelspeed);
 void bwalkUpdateVertical(void);
 void bwalkApplyCrouchSpeed(void);

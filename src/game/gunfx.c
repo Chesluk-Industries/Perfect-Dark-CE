@@ -101,6 +101,48 @@ void beamCreate(struct beam *beam, s32 weaponnum, struct coord *from, struct coo
 	}
 }
 
+#ifndef PLATFORM_N64
+static struct coord g_LaserStreamTailCam[MAX_PLAYERS][2];
+
+/**
+ * MOD: high framerates - the Laser's stream is kept for two 60ths, and above
+ * 60 FPS the gun moved on and left it behind: each frame it starts at the
+ * muzzle again and ends at the same point relative to the camera.
+ */
+void beamFollowHand(s32 handnum)
+{
+	struct hand *hand = &g_Vars.currentplayer->hands[handnum];
+	struct beam *beam = &hand->beam;
+	struct coord tail;
+	f32 len;
+
+	if (beam->age < 0 || beam->weaponnum != -2
+			|| g_Vars.currentplayernum < 0 || g_Vars.currentplayernum >= MAX_PLAYERS) {
+		return;
+	}
+
+	mtx4TransformVec(camGetProjectionMtxF(), &g_LaserStreamTailCam[g_Vars.currentplayernum][handnum], &tail);
+
+	beam->from = hand->muzzlepos;
+	beam->dir.x = tail.x - beam->from.x;
+	beam->dir.y = tail.y - beam->from.y;
+	beam->dir.z = tail.z - beam->from.z;
+
+	len = sqrtf(beam->dir.x * beam->dir.x + beam->dir.y * beam->dir.y + beam->dir.z * beam->dir.z);
+
+	if (len <= 0) {
+		return;
+	}
+
+	beam->dir.x /= len;
+	beam->dir.y /= len;
+	beam->dir.z /= len;
+
+	beam->maxdist = len;
+	beam->mindist = len > 3000 ? 3000 : len;
+}
+#endif
+
 void beamCreateForHand(s32 handnum)
 {
 	struct player *player = g_Vars.currentplayer;
@@ -123,6 +165,14 @@ void beamCreateForHand(s32 handnum)
 
 		beam = &hand->beam;
 		beamCreate(beam, weaponnum, &hand->muzzlepos, &hand->hitpos);
+
+#ifndef PLATFORM_N64
+		// MOD: high framerates - remember where the stream ends, relative to
+		// the camera, so it can follow the gun until the next shot
+		if (weaponnum == -2 && g_Vars.currentplayernum >= 0 && g_Vars.currentplayernum < MAX_PLAYERS) {
+			mtx4TransformVec(camGetWorldToScreenMtxf(), &hand->hitpos, &g_LaserStreamTailCam[g_Vars.currentplayernum][handnum]);
+		}
+#endif
 
 		if (beam->weaponnum == WEAPON_MAULER) {
 			beam->weaponnum = -3 - (s32)player->hands[handnum].matmot1;
@@ -601,11 +651,21 @@ void beamTick(struct beam *beam)
 {
 	if (beam->age >= 0) {
 		if (beam->weaponnum == -2) {
+#ifndef PLATFORM_N64
+			// MOD: laser beam - it lasted two ticks (2/60ths of a second at
+			// 60 FPS, a 30th of that at 240); it now lasts two 60ths
+			beam->age += g_Vars.lvupdate240;
+
+			if (beam->age > 7) {
+				beam->age = -1;
+			}
+#else
 			beam->age++;
 
 			if (beam->age > 1) {
 				beam->age = -1;
 			}
+#endif
 		} else {
 			if (g_Vars.lvupdate240 <= 8) {
 				// Not lagging

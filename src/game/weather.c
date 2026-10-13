@@ -448,6 +448,28 @@ u32 g_RainSpeedExtra;
 u32 g_SnowSpeed;
 u32 g_SnowSpeedExtra;
 
+#ifndef PLATFORM_N64
+// MOD: weather timing - the rain's fades and new wind rolls once per 60th, not per tick
+
+static bool weatherRollNewWind(void)
+{
+	s32 steps = LV_STEPS240(4);
+	bool result = false;
+
+	while (steps-- > 0) {
+		if (RANDOMFRAC() > 0.99f) {
+			result = true;
+		}
+	}
+
+	return result;
+}
+
+#define WEATHER_NEWWIND() weatherRollNewWind()
+#else
+#define WEATHER_NEWWIND() (RANDOMFRAC() > 0.99f)
+#endif
+
 void weatherTickRain(struct weatherdata *weather)
 { \
 	s32 lVar6 = 0;
@@ -460,6 +482,12 @@ void weatherTickRain(struct weatherdata *weather)
 
 	mainOverrideVariable("rainspeedxtra", &g_RainSpeedExtra);
 
+#ifndef PLATFORM_N64
+	{
+		s32 steps = LV_STEPS240(4);
+
+		while (steps-- > 0) {
+#endif
 	if (weather->unk90 > 0) {
 		weather->unk88 += (weather->unk8c - weather->unk88) / weather->unk90;
 	}
@@ -480,6 +508,10 @@ void weatherTickRain(struct weatherdata *weather)
 		weather->unk58[2].unk00 += (weather->unk58[2].unk04 - weather->unk58[2].unk00) / weather->unk58[2].unk08;
 		weather->unk58[2].unk08--;
 	}
+#ifndef PLATFORM_N64
+		}
+	}
+#endif
 
 	// Rain noise
 	for (i = 0; i != 4; i++) {
@@ -559,7 +591,7 @@ void weatherTickRain(struct weatherdata *weather)
 		weather->windspeedx = cosf(weather->windanglerad) * weather->windspeed;
 		weather->windspeedz = sinf(weather->windanglerad) * weather->windspeed;
 		lVar6 = 1;
-	} else if (RANDOMFRAC() > 0.99f) {
+	} else if (WEATHER_NEWWIND()) {
 		rand = RANDOMFRAC();
 
 		weather->unk0c = (rand + rand) * M_PI;
@@ -665,7 +697,7 @@ void weatherTickSnow(struct weatherdata *weather)
 		weather->windspeedx = cosf(weather->windanglerad) * weather->windspeed;
 		weather->windspeedz = sinf(weather->windanglerad) * weather->windspeed;
 		lVar7 = 1;
-	} else if (RANDOMFRAC() > 0.99f) {
+	} else if (WEATHER_NEWWIND()) {
 		rand = RANDOMFRAC();
 
 		weather->unk0c = (rand + rand) * M_PI;
@@ -1173,7 +1205,12 @@ Gfx *weatherRenderRain(Gfx *gdl, struct weatherdata *weather, s32 arg2)
 		}
 
 		// Update thunder and lightning
+#ifndef PLATFORM_N64
+		// MOD: high framerates - lightning steps once per 60th, not per frame
+		if (LV_STEPS240(4) > 0) {
+#else
 		if (g_Vars.lvupdate240 > 0) {
+#endif
 			g_SkyLightningActive = false;
 
 			if (weather->unk94 < 0) {

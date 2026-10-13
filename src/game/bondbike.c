@@ -254,7 +254,12 @@ void bbikeApplyMoveData(struct movedata *data)
 	// Sideways
 	if (data->digitalstepleft) {
 		f32 value2 = -1.0f - g_Vars.currentplayer->speedsideways;
+#ifndef PLATFORM_N64
+		// MOD: high framerates - by time, not input samples (one per frame on PC)
+		f32 tmp = g_Vars.lvupdate60f * PALUPF(-0.1f);
+#else
 		f32 tmp = data->digitalstepleft * PALUPF(-0.1f);
+#endif
 
 		if (value2 < tmp) {
 			value2 = tmp;
@@ -263,7 +268,11 @@ void bbikeApplyMoveData(struct movedata *data)
 		g_Vars.currentplayer->speedsideways += value2;
 	} else if (data->digitalstepright) {
 		f32 value2 = 1.0f - g_Vars.currentplayer->speedsideways;
+#ifndef PLATFORM_N64
+		f32 tmp = g_Vars.lvupdate60f * PALUPF(0.1f); // MOD: high framerates
+#else
 		f32 tmp = data->digitalstepright * PALUPF(0.1f);
+#endif
 
 		if (value2 > tmp) {
 			value2 = tmp;

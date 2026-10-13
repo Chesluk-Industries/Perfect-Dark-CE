@@ -6,12 +6,18 @@
 #include "data.h"
 #include "types.h"
 
+#ifndef PLATFORM_N64
+#define PSCHANNELCOUNT() 160 // MOD: sound capacity (4 x 40)
+#else
+#define PSCHANNELCOUNT() (IS4MB() ? 30 : 40)
+#endif
+
 void psStop(void)
 {
 	if (g_SndDisabled) return;
 	s32 i;
 
-	for (i = 0; i < (IS4MB() ? 30 : 40); i++) {
+	for (i = 0; i < PSCHANNELCOUNT(); i++) {
 		if (g_PsChannels[i].flags & PSFLAG_ISMP3) {
 			sndStopMp3(g_PsChannels[i].soundnum26);
 			g_PsChannels[i].flags &= ~PSFLAG_ISMP3;

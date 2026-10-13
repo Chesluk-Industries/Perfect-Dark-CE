@@ -208,6 +208,28 @@ void shardCreate(RoomNum room, struct coord *pos, f32 rotx, f32 size, s32 type)
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: smooth speed - shards move in 60th steps: drawn above 60 FPS, they're
+ * carried on by the part of the next step that has passed
+ */
+static void shardLoadDrawMtx(struct shard *shard, Mtxf *mtx)
+{
+	f32 ahead = g_Vars.lvupdate240rem * 0.25f;
+	struct coord pos;
+	struct coord rot;
+
+	pos.x = shard->pos.x + shard->vel.x * ahead;
+	pos.y = shard->pos.y + shard->vel.y * ahead;
+	pos.z = shard->pos.z + shard->vel.z * ahead;
+	rot.x = shard->rot.x + shard->rotspeed.x * ahead;
+	rot.y = shard->rot.y + shard->rotspeed.y * ahead;
+	rot.z = shard->rot.z + shard->rotspeed.z * ahead;
+
+	mtx4LoadRotationAndTranslation(&pos, &rot, mtx);
+}
+#endif
+
 Gfx *shardsRenderWood(Gfx *gdl)
 {
 	if (g_ShardsActive) {
@@ -255,7 +277,11 @@ Gfx *shardsRenderWood(Gfx *gdl)
 				if (render) {
 					struct shard *shard = (struct shard *) ((u8 *)g_Shards + i * sizeof(struct shard));
 
+#ifndef PLATFORM_N64
+					shardLoadDrawMtx(shard, &shardmtx); // MOD: smooth speed
+#else
 					mtx4LoadRotationAndTranslation(&shard->pos, &shard->rot, &shardmtx);
+#endif
 
 					shardmtx.m[3][0] -= g_Vars.currentplayer->globaldrawworldoffset.x;
 					shardmtx.m[3][1] -= g_Vars.currentplayer->globaldrawworldoffset.y;
@@ -377,7 +403,11 @@ Gfx *shardsRenderGlass(Gfx *gdl)
 				if (render) {
 					struct shard *shard = (struct shard *) ((u8 *)g_Shards + i * sizeof(struct shard));
 
+#ifndef PLATFORM_N64
+					shardLoadDrawMtx(shard, &shardmtx); // MOD: smooth speed
+#else
 					mtx4LoadRotationAndTranslation(&shard->pos, &shard->rot, &shardmtx);
+#endif
 
 					shardmtx.m[3][0] -= g_Vars.currentplayer->globaldrawworldoffset.x;
 					shardmtx.m[3][1] -= g_Vars.currentplayer->globaldrawworldoffset.y;

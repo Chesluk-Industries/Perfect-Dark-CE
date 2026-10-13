@@ -10,8 +10,20 @@
 #define LV_SLOMO_TICK_RATE LV_SLOMO_TICK_CAP
 #else
 // game runs at 60+, so slomo = 1/2 of whatever framerate we're running at
-#define LV_SLOMO_TICK_CAP 1 // capping at >= 240fps would make it explode
-#define LV_SLOMO_TICK_RATE (g_Vars.lvupdate240 / 2)
+// MOD: slow motion - half of every frame's time, the odd 240th carried over
+// to the next (at 240 fps the old lvupdate240 / 2 was 0 and capped off: no
+// slow motion). Frames left with no time are skipped, as when paused, but
+// lvIsSlowMotionSkip() tells them apart (looping sounds keep playing).
+#define LV_SLOMO_TICK_CAP 0
+#define LV_SLOMO_TICK_RATE lvSlowMotionHalve(g_Vars.lvupdate240)
+s32 lvSlowMotionHalve(s32 lvupdate240);
+bool lvIsSlowMotionSkip(void);
+
+// MOD: high framerates - how many steps of n 240ths of a second this tick
+// completes, and whether it completes one (n 4: once per 60th, for work the
+// game did once per frame at 60 FPS)
+#define LV_STEPS240(n) (g_Vars.lvframe240 / (n) - (g_Vars.lvframe240 - g_Vars.lvupdate240) / (n))
+#define LV_STEP240(n) (LV_STEPS240(n) > 0)
 #endif
 
 u32 getVar80084040(void);

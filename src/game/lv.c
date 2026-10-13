@@ -203,11 +203,43 @@ void lvSetMiscSfxState(u32 type, bool play)
 	}
 }
 
+#ifndef PLATFORM_N64
+// MOD: slow motion - see LV_SLOMO_TICK_RATE
+static s32 g_LvSlowMotionRem = 0;
+static bool g_LvSlowMotionSkip = false;
+
+// MOD: high framerates - combat boost transition steps (60ths of real time)
+static s32 g_LvSpeedPillAcc240 = 0;
+static s32 g_LvSpeedPillSteps = 0;
+
+s32 lvSlowMotionHalve(s32 lvupdate240)
+{
+	s32 total = lvupdate240 + g_LvSlowMotionRem;
+
+	g_LvSlowMotionRem = total & 1;
+	g_LvSlowMotionSkip = total < 2;
+
+	return total >> 1;
+}
+
+// A frame with no game time that isn't a pause (slow motion skipping a frame,
+// or one shorter than a 240th): looping sounds keep playing (they were
+// stopped and restarted, speeding up the boost heartbeat and cutting others)
+bool lvIsSlowMotionSkip(void)
+{
+	return g_LvSlowMotionSkip && g_Vars.lvupdate240 == 0;
+}
+
+#define LV_PAUSED() (g_Vars.lvupdate240 == 0 && !lvIsSlowMotionSkip())
+#else
+#define LV_PAUSED() (g_Vars.lvupdate240 == 0)
+#endif
+
 void lvUpdateMiscSfx(void)
 {
 	s32 i;
 
-	if (g_Vars.lvupdate240 == 0) {
+	if (LV_PAUSED()) {
 		for (i = 0; i != ARRAYCOUNT(g_MiscSfxActiveTypes); i++) {
 			lvSetMiscSfxState(i, false);
 		}
@@ -231,7 +263,7 @@ void lvUpdateMiscSfx(void)
 		lvSetMiscSfxState(MISCSFX_SLAYERROCKETBEEP, usingrocket);
 	}
 
-	if (g_Vars.lvupdate240 == 0 && g_MiscAudioHandle && sndGetState(g_MiscAudioHandle) != AL_STOPPED) {
+	if (LV_PAUSED() && g_MiscAudioHandle && sndGetState(g_MiscAudioHandle) != AL_STOPPED) {
 		audioStop(g_MiscAudioHandle);
 	}
 }
@@ -1486,10 +1518,39 @@ Gfx *lvRender(Gfx *gdl)
 
 								// Consider a single frame of static, separate
 								// to the main static above
+#ifndef PLATFORM_N64
+								{
+									// MOD: cutscene static - the flash is rolled 30 times a
+									// second (not every frame) and lasts an N64 frame
+									static s32 roll240 = 0;
+									static s32 time240 = 0;
+
+									time240 -= g_Vars.diffframe240;
+									roll240 += g_Vars.diffframe240;
+
+									if (roll240 > 8 * 8) {
+										roll240 = 8 * 8; // (after a long frame, don't catch up)
+									}
+
+									while (roll240 >= 8) {
+										roll240 -= 8;
+
+										if (rngRandom() % 60 == 1) {
+											time240 = 8;
+											sndStart(var80095200, SFX_INFIL_STATIC_SHORT, NULL, -1, -1, -1, -1, -1);
+										}
+									}
+
+									if (time240 > 0) {
+										cutscenestatic = 255;
+									}
+								}
+#else
 								if (rngRandom() % 60 == 1) {
 									cutscenestatic = 255;
 									sndStart(var80095200, SFX_INFIL_STATIC_SHORT, NULL, -1, -1, -1, -1, -1);
 								}
+#endif
 
 								if (cutscenestatic) {
 									gdl = bviewDrawStatic(gdl, 0xffffffff, cutscenestatic);
@@ -1545,7 +1606,20 @@ Gfx *lvRender(Gfx *gdl)
 					if ((g_Vars.speedpillchange > 0 && g_Vars.speedpillchange < (PAL ? 26 : 30))
 							|| (g_Vars.speedpillwant && !g_Vars.speedpillon)
 							|| (!g_Vars.speedpillwant && g_Vars.speedpillon)) {
+#ifndef PLATFORM_N64
+						// MOD: high framerates - the transition steps once per
+						// 60th of real time, not per frame
+						if (g_Vars.currentplayernum == 0) {
+							g_LvSpeedPillAcc240 += g_Vars.diffframe240;
+							g_LvSpeedPillSteps = g_LvSpeedPillAcc240 / 4;
+							g_LvSpeedPillAcc240 -= g_LvSpeedPillSteps * 4;
+						}
+
+						if (g_Vars.speedpillchange == (PAL ? 26 : 30) && !g_Vars.speedpillwant
+								&& g_LvSpeedPillSteps > 0) {
+#else
 						if (g_Vars.speedpillchange == (PAL ? 26 : 30) && !g_Vars.speedpillwant) {
+#endif
 							sndStart(var80095200, lvGetSlowMotionType() ? SFX_JO_BOOST_ACTIVATE : SFX_ARGH_JO_02AD, 0, -1, -1, -1, -1, -1);
 						}
 
@@ -1566,11 +1640,19 @@ Gfx *lvRender(Gfx *gdl)
 						}
 
 						if (g_Vars.currentplayernum == 0) {
+#ifndef PLATFORM_N64
+							if (g_Vars.speedpillwant) {
+								g_Vars.speedpillchange += g_LvSpeedPillSteps;
+							} else {
+								g_Vars.speedpillchange -= g_LvSpeedPillSteps;
+							}
+#else
 							if (g_Vars.speedpillwant) {
 								g_Vars.speedpillchange++;
 							} else {
 								g_Vars.speedpillchange--;
 							}
+#endif
 						}
 
 						if (g_Vars.speedpillchange > (PAL ? 26 : 30)) {
@@ -2122,6 +2204,9 @@ void lvTick(void)
 	} else {
 		s32 slowmo = lvGetSlowMotionType();
 		g_Vars.lvupdate240 = g_Vars.diffframe240;
+#ifndef PLATFORM_N64
+		g_LvSlowMotionSkip = false; // MOD: slow motion
+#endif
 
 		if (slowmo == SLOWMOTION_ON) {
 			if (g_Vars.speedpillon == false || g_Vars.in_cutscene) {
@@ -2179,6 +2264,11 @@ void lvTick(void)
 			}
 		}
 	}
+
+#ifndef PLATFORM_N64
+	// MOD: high framerates - a zero-tick frame that isn't a pause (see lvIsSlowMotionSkip)
+	g_LvSlowMotionSkip = !lvIsPaused() && !mpIsPaused() && (g_LvSlowMotionSkip || g_Vars.lvupdate240 == 0);
+#endif
 
 	g_Vars.lvupdate60 = g_Vars.lvupdate240 + g_Vars.lvupdate240rem;
 	g_Vars.lvupdate240rem = g_Vars.lvupdate60 & 3;

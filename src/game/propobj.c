@@ -13,6 +13,9 @@
 #include "game/prop.h"
 #include "game/setuputils.h"
 #include "game/propsnd.h"
+#ifndef PLATFORM_N64
+#include "system.h" // MOD: cutscene lift sound - sysLogPrintf
+#endif
 #include "game/objectives.h"
 #include "game/game_096360.h"
 #include "game/atan2f.h"
@@ -3539,6 +3542,150 @@ bool func0f06d37c(struct defaultobj *obj, struct coord *arg1, struct coord *arg2
  *
  * The new speed and distance done are written back to those pointers.
  */
+#ifndef PLATFORM_N64
+/**
+ * MOD: smooth speed - applySpeed moved things in whole 60ths of a second
+ * (lvupdate60), which is 0 on most ticks above 60 FPS: doors, lifts,
+ * crouching, turrets and hover objects moved on one frame and held for the
+ * next ones. They now take the tick's time in part steps (lvupdate240 / 4):
+ * a whole step is done exactly as before, a part step moves and accelerates
+ * by that part. Code that only runs on whole 60ths (a chr's AI turning) uses
+ * applySpeed60/applyRotation60, which keep the whole steps.
+ */
+
+// For "x += (target - x) * k" done once per 60th: the k for a part t of a 60th
+static f32 smoothStepFrac(f32 k, f32 t)
+{
+	if (t >= 1.0f || k >= 1.0f) {
+		return k >= 1.0f ? 1.0f : k;
+	}
+
+	return 1.0f - __builtin_powf(1.0f - k, t);
+}
+
+// "x += (target - x) * k" for the tick's time in 60ths (whole ones, then a part)
+static f32 smoothLerp60(f32 x, f32 target, f32 k)
+{
+	f32 steps = g_Vars.lvupdate240 * 0.25f;
+
+	while (steps > 0.0f) {
+		x += (target - x) * smoothStepFrac(k, steps);
+		steps -= 1.0f;
+	}
+
+	return x;
+}
+
+static void applySpeedSteps(f32 *distdone, f32 maxdist, f32 *speedptr, f32 accel, f32 decel, f32 maxspeed, f32 steps)
+{
+	f32 speed = *speedptr;
+
+	while (steps > 0.0f) {
+		f32 t = steps < 1.0f ? steps : 1.0f;
+		f32 limit = speed * speed * 0.5f / decel;
+		f32 distremaining = maxdist - *distdone;
+
+		steps -= 1.0f;
+
+		if (distremaining > 0.0f) {
+			if (speed > 0.0f && distremaining <= limit) {
+				// Slow down for end
+				speed -= decel * t;
+
+				if (speed < decel) {
+					speed = decel;
+				}
+			} else if (speed < maxspeed) {
+				// Accelerate
+				if (speed < 0.0f) {
+					speed += decel * t;
+				} else {
+					speed += accel * t;
+				}
+
+				if (speed > maxspeed) {
+					speed = maxspeed;
+				}
+			}
+
+			if (speed * t >= distremaining) {
+				*distdone = maxdist;
+				break;
+			}
+
+			*distdone += speed * t;
+		} else {
+			if (speed < 0.0f && -distremaining <= limit) {
+				speed += decel * t;
+
+				if (speed > -decel) {
+					speed = -decel;
+				}
+			} else if (speed > -maxspeed) {
+				if (speed > 0.0f) {
+					speed -= decel * t;
+				} else {
+					speed -= accel * t;
+				}
+
+				if (speed < -maxspeed) {
+					speed = -maxspeed;
+				}
+			}
+
+			if (speed * t <= distremaining) {
+				*distdone = maxdist;
+				break;
+			}
+
+			*distdone += speed * t;
+		}
+	}
+
+	*speedptr = speed;
+}
+
+static void applyRotationSteps(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32 maxspeed, f32 steps)
+{
+	f32 tmp = maxrot - *angle;
+
+	if (tmp < -M_PI) {
+		maxrot += M_BADTAU;
+	} else if (tmp >= M_PI) {
+		maxrot -= M_BADTAU;
+	}
+
+	applySpeedSteps(angle, maxrot, speed, accel, decel, maxspeed, steps);
+
+	if (*angle < 0) {
+		*angle += M_BADTAU;
+	}
+
+	if (*angle >= M_BADTAU) {
+		*angle -= M_BADTAU;
+	}
+}
+
+void applySpeed(f32 *distdone, f32 maxdist, f32 *speedptr, f32 accel, f32 decel, f32 maxspeed)
+{
+	applySpeedSteps(distdone, maxdist, speedptr, accel, decel, maxspeed, g_Vars.lvupdate240 * 0.25f);
+}
+
+void applyRotation(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32 maxspeed)
+{
+	applyRotationSteps(angle, maxrot, speed, accel, decel, maxspeed, g_Vars.lvupdate240 * 0.25f);
+}
+
+void applySpeed60(f32 *distdone, f32 maxdist, f32 *speedptr, f32 accel, f32 decel, f32 maxspeed)
+{
+	applySpeedSteps(distdone, maxdist, speedptr, accel, decel, maxspeed, g_Vars.lvupdate60);
+}
+
+void applyRotation60(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32 maxspeed)
+{
+	applyRotationSteps(angle, maxrot, speed, accel, decel, maxspeed, g_Vars.lvupdate60);
+}
+#else
 void applySpeed(f32 *distdone, f32 maxdist, f32 *speedptr, f32 accel, f32 decel, f32 maxspeed)
 {
 	f32 speed = *speedptr;
@@ -3626,6 +3773,7 @@ void applyRotation(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32
 		*angle -= M_BADTAU;
 	}
 }
+#endif
 
 #define NEXT(i) ((i + 1) % 3)
 #define PREV(i) ((i + 2) % 3)
@@ -4583,7 +4731,13 @@ void weaponTick(struct prop *prop)
 	} else if (weapon->weaponnum == WEAPON_BOLT) {
 		// Handle crossbow bolts
 		// Note that the timer240 value doesn't act like a timer at all
+#ifndef PLATFORM_N64
+		// MOD: bolt wobble - the stuck bolt's wobble took a step every tick
+		// (four times as fast at 240 FPS); it now takes one every 60th
+		if (weapon->timer240 >= 2 && LV_STEP240(4)) {
+#else
 		if (weapon->timer240 >= 2) {
+#endif
 			// Bolt is travelling
 			struct modelrodata_bbox *bbox = modelFindBboxRodata(obj->model);
 			s32 ival = weapon->timer240 - 1;
@@ -5368,12 +5522,28 @@ void hovTick(struct defaultobj *obj, struct hov *hov)
 			}
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: smooth speed - hover height and pitch move in part steps too
+		f32 hovsteps = g_Vars.lvupdate240 * 0.25f;
+
+		while (hovsteps > 0.0f) {
+			f32 t = hovsteps < 1.0f ? hovsteps : 1.0f;
+#define HOVSTEP(k) smoothStepFrac((k), t)
+#define HOVCLAMP(v) ((v) * t)
+#else
 		for (i = 0; i < g_Vars.lvupdate60; i++) {
+#define HOVSTEP(k) (k)
+#define HOVCLAMP(v) (v)
+#endif
 			f32 f0;
 			f32 f12;
 			f32 f2;
 
-			hov->groundpitch += (groundangle - hov->groundpitch) * (PAL ? 0.0893f : 0.075f);
+#ifndef PLATFORM_N64
+			hovsteps -= 1.0f;
+#endif
+
+			hov->groundpitch += (groundangle - hov->groundpitch) * HOVSTEP(PAL ? 0.0893f : 0.075f);
 
 			f0 = ground - hov->y;
 			f12 = (PAL ? 0.102000005f : 0.085f);
@@ -5393,31 +5563,33 @@ void hovTick(struct defaultobj *obj, struct hov *hov)
 					f12 = PALUPF(0.5f);
 				}
 
-				f0 *= f12;
+				f0 *= HOVSTEP(f12);
 			} else {
-				f0 *= f12;
+				f0 *= HOVSTEP(f12);
 
 				if (obj->hidden & OBJHFLAG_MOUNTED) {
-					if (f0 > 10.0f) {
-						f0 = 10.0f;
-					} else if (f0 < -10.0f) {
-						f0 = -10.0f;
+					if (f0 > HOVCLAMP(10.0f)) {
+						f0 = HOVCLAMP(10.0f);
+					} else if (f0 < -HOVCLAMP(10.0f)) {
+						f0 = -HOVCLAMP(10.0f);
 					}
 				} else {
-					if (f0 > 5.0f) {
-						f0 = 5.0f;
-					} else if (f0 < -5.0f) {
-						f0 = -5.0f;
+					if (f0 > HOVCLAMP(5.0f)) {
+						f0 = HOVCLAMP(5.0f);
+					} else if (f0 < -HOVCLAMP(5.0f)) {
+						f0 = -HOVCLAMP(5.0f);
 					}
 				}
 			}
 
 			hov->y += f0;
 
-			if (f0 > 1.0f || f0 < -1.0f) {
+			if (f0 > HOVCLAMP(1.0f) || f0 < -HOVCLAMP(1.0f)) {
 				moved = true;
 			}
 		}
+#undef HOVSTEP
+#undef HOVCLAMP
 
 		if (moved) {
 			func0f069c70(obj, true, true);
@@ -5801,9 +5973,13 @@ void hoverbikeUpdateMovement(struct hoverbikeobj *bike, f32 speedforwards, f32 s
 		tmp *= 1.0f - speedforwards * 0.5f;
 	}
 
+#ifndef PLATFORM_N64
+	bike->w = smoothLerp60(bike->w, tmp, PAL ? 0.0893f : 0.075f); // MOD: smooth speed
+#else
 	for (i = 0; i < g_Vars.lvupdate60; i++) {
 		bike->w += (tmp - bike->w) * (PAL ? 0.0893f : 0.075f);
 	}
+#endif
 
 	sp6c += bike->w * 12;
 	angle = hoverpropGetTurnAngle(&bike->base);
@@ -5830,7 +6006,11 @@ void hoverbikeUpdateMovement(struct hoverbikeobj *bike, f32 speedforwards, f32 s
 		}
 	}
 
+#ifndef PLATFORM_N64
+	bike->leandiff *= 1.0f - smoothStepFrac(0.07f, g_Vars.lvupdate240 * 0.25f); // MOD: smooth speed
+#else
 	bike->leandiff *= 0.93f;
+#endif
 	bike->leandiff += speedforwards - bike->leanspeed;
 	bike->leanspeed = speedforwards;
 
@@ -5880,6 +6060,29 @@ void hoverbikeUpdateMovement(struct hoverbikeobj *bike, f32 speedforwards, f32 s
 
 	sp68 += speedsideways * 0.2512874007225f;
 
+#ifndef PLATFORM_N64
+	{
+		// MOD: smooth speed - the bike's drift and tilt in part steps too
+		f32 steps = g_Vars.lvupdate240 * 0.25f;
+
+		while (steps > 0.0f) {
+			f32 t = steps < 1.0f ? steps : 1.0f;
+			f32 keep = 1.0f - smoothStepFrac(PAL ? 0.036f : 0.03f, t);
+
+			bike->speedabs[1] *= keep;
+			bike->speedabs[0] *= keep;
+			bike->speedabs[1] += bike->rels[1] * cosangle * PALUPF(1.08f) * t;
+			bike->speedabs[0] += bike->rels[1] * sinangle * PALUPF(1.08f) * t;
+			bike->speedabs[1] += bike->rels[0] * sinangle * PALUPF(0.72f) * t;
+			bike->speedabs[0] += -bike->rels[0] * cosangle * PALUPF(0.72f) * t;
+			steps -= 1.0f;
+		}
+
+		bike->exreal = smoothLerp60(bike->exreal, sp70, PAL ? 0.0478f : 0.04f);
+		bike->ezreal = smoothLerp60(bike->ezreal, sp6c, PAL ? 0.177f : 0.15f);
+		bike->ezreal2 = smoothLerp60(bike->ezreal2, sp68, PAL ? 0.0478f : 0.04f);
+	}
+#else
 	for (i = 0; i < g_Vars.lvupdate60; i++) {
 		bike->speedabs[1] *= PAL ? 0.964f : 0.97f;
 		bike->speedabs[0] *= PAL ? 0.964f : 0.97f;
@@ -5894,6 +6097,7 @@ void hoverbikeUpdateMovement(struct hoverbikeobj *bike, f32 speedforwards, f32 s
 		bike->ezreal += (sp6c - bike->ezreal) * (PAL ? 0.177f : 0.15f);
 		bike->ezreal2 += (sp68 - bike->ezreal2) * (PAL ? 0.0478f : 0.04f);
 	}
+#endif
 
 	if (speedforwards >= 0.99f) {
 		bike->maxspeedtime240 += g_Vars.lvupdate240;
@@ -6085,6 +6289,29 @@ bool rocketTickFbw(struct weaponobj *rocket)
 	newpos.y = rocketprop->pos.y;
 	newpos.z = rocketprop->pos.z;
 
+#ifndef PLATFORM_N64
+	{
+		// MOD: smooth speed - the rocket flies in part steps too
+		f32 steps = g_Vars.lvupdate240 * 0.25f;
+
+		while (steps > 0.0f) {
+			f32 t = steps < 1.0f ? steps : 1.0f;
+
+			projectile->unk010 += (PAL ? 0.0021600001f : 0.0018f) * t;
+
+			speed = projectile->unk010;
+
+			if (ownerchr && ownerchr->target == -1) {
+				speed = PAL ? 0.120000004f : 0.10f;
+			}
+
+			newpos.x += dir.x * speed * t;
+			newpos.y += dir.y * speed * t;
+			newpos.z += dir.z * speed * t;
+			steps -= 1.0f;
+		}
+	}
+#else
 	for (i = 0; i < g_Vars.lvupdate60; i++) {
 		projectile->unk010 += PAL ? 0.0021600001f : 0.0018f;
 
@@ -6098,6 +6325,7 @@ bool rocketTickFbw(struct weaponobj *rocket)
 		newpos.y += dir.y * speed;
 		newpos.z += dir.z * speed;
 	}
+#endif
 
 	// Check if new pos would collide with anything
 	if (projectile->ownerprop) {
@@ -6802,7 +7030,13 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 							mainOverrideVariable("kkd", &kkd);
 							mainOverrideVariable("kkp", &kkp);
 
+#ifndef PLATFORM_N64
+							// MOD: high framerates - the term divided by the frame
+							// length made homing rockets turn ~3x as hard at 240 FPS
+							tmp = ((kkd / 100.0f * var80069bc4) + (kkp / 100.00f * sp28c)) * (kkg / 100.000f) * LVUPDATE60FREAL();
+#else
 							tmp = ((kkd / 100.0f * var80069bc4 / LVUPDATE60FREAL()) + (kkp / 100.00f * sp28c * LVUPDATE60FREAL())) * (kkg / 100.000f);
+#endif
 
 							var80069bc4 = sp28c;
 
@@ -6881,7 +7115,26 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 				}
 
 				if (projectile->flags & PROJECTILEFLAG_STICKY) {
+#ifndef PLATFORM_N64
+					// MOD: sticky projectiles - a mine sticks if its path reaches
+					// the surface before it sinks into the floor: with the short
+					// steps above 60 FPS mines thrown at your feet nearly always
+					// slid. The test looks a 60th of the move ahead, as at 60.
+					struct coord stickpos = sp5dc;
+					f32 t = g_Vars.lvupdate60freal;
+
+					if (t > 0.0f && t < 1.0f) {
+						f32 ext = 1.0f / t - 1.0f;
+
+						stickpos.x += (sp5dc.x - prop->pos.x) * ext;
+						stickpos.y += (sp5dc.y - prop->pos.y) * ext;
+						stickpos.z += (sp5dc.z - prop->pos.z) * ext;
+					}
+
+					cdresult = func0f06cd00(obj, &stickpos, &sp5e8, &sp5f4);
+#else
 					cdresult = func0f06cd00(obj, &sp5dc, &sp5e8, &sp5f4);
+#endif
 				} else {
 					cdresult = func0f06d37c(obj, &sp5dc, &sp5e8, &sp5f4);
 				}
@@ -7390,6 +7643,9 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 									smokepos.y = prop->pos.y - smokepos.y * 20.0f;
 									smokepos.z = prop->pos.z - smokepos.z * 20.0f;
 
+#ifndef PLATFORM_N64
+									if (LV_STEP240(4)) // MOD: high framerates - trail smoke per 60th
+#endif
 									smokeCreateSimple(&smokepos, prop->rooms, SMOKETYPE_ROCKETTAIL);
 								}
 							}
@@ -7397,6 +7653,9 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 							if (cdresult == CDRESULT_COLLISION) {
 								weapon->timer240 = 0;
 							} else {
+#ifndef PLATFORM_N64
+								if (LV_STEP240(4)) // MOD: high framerates - trail smoke per 60th
+#endif
 								smokeCreateSimple(&prop->pos, prop->rooms, SMOKETYPE_HOMINGTAIL);
 							}
 						} else if (weapon->weaponnum == WEAPON_GRENADEROUND
@@ -7412,13 +7671,23 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 								if (weapon->weaponnum != WEAPON_NBOMB || weapon->timer240 >= 0) {
 									weapon->timer240 = 0;
 								}
+#ifndef PLATFORM_N64
+							} else if (weapon->weaponnum != WEAPON_NBOMB && LV_STEP240(4)) { // MOD: high framerates - trail smoke per 60th
+#else
 							} else if (weapon->weaponnum != WEAPON_NBOMB) {
+#endif
 								smokeCreateSimple(&prop->pos, prop->rooms, SMOKETYPE_GRENADETAIL);
 							}
 						}
 
 						if (cdresult == CDRESULT_COLLISION) {
+#ifndef PLATFORM_N64
+							// MOD: bounce sound - throttled by 3 frames (a 20th at
+							// 60 FPS, an 80th at 240); now by 3 60ths of a second
+							if (projectile->unk0a4 < 0 || projectile->unk0a4 < g_Vars.lvframe240 - 11) {
+#else
 							if (projectile->unk0a4 < g_Vars.lvframenum - 2) {
+#endif
 								if (weapon->weaponnum == WEAPON_COMBATKNIFE || weapon->weaponnum == WEAPON_COMBATKNIFE) {
 									psCreate(0, prop, SFX_808B, -1, -1, 0, 0, PSTYPE_NONE, 0, -1.0f, 0, -1, -1.0f, -1.0f, -1.0f);
 								} else if (weapon->weaponnum == WEAPON_GRENADE && weapon->gunfunc == FUNC_SECONDARY) {
@@ -7431,7 +7700,11 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 								}
 							}
 
+#ifndef PLATFORM_N64
+							projectile->unk0a4 = g_Vars.lvframe240;
+#else
 							projectile->unk0a4 = g_Vars.lvframenum;
+#endif
 						}
 					}
 
@@ -7477,6 +7750,48 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 
 					stop = false;
 
+#ifndef PLATFORM_N64
+					{
+						// MOD: smooth speed - a settling object slides in part
+						// steps too (the same at 60 FPS)
+						f32 steps = g_Vars.lvupdate240 * 0.25f;
+
+						while (steps > 0.0f) {
+							f32 t = steps < 1.0f ? steps : 1.0f;
+
+							steps -= 1.0f;
+
+							sp5dc.x += PALUPF(projectile->speed.x) * t;
+							sp5dc.z += PALUPF(projectile->speed.z) * t;
+
+							if (projectile->unk060 >= 1.0f) {
+								if (projectile->unk098 > 0.0f) {
+									f32 dist = sqrtf(projectile->speed.f[0] * projectile->speed.f[0] + projectile->speed.f[2] * projectile->speed.f[2]);
+
+									if (dist > 0.0f) {
+										f12 = projectile->unk098 * (t >= 1.0f ? g_Vars.lvupdate60freal : PALUPF(t)) / dist;
+
+										if (f12 >= 1.0f) {
+											projectile->speed.x = 0.0f;
+											projectile->speed.z = 0.0f;
+										} else {
+											projectile->speed.x -= projectile->speed.x * f12;
+											projectile->speed.z -= projectile->speed.z * f12;
+										}
+									} else {
+										projectile->speed.x = 0.0f;
+										projectile->speed.z = 0.0f;
+									}
+								} else {
+									f32 keep = 1.0f - smoothStepFrac(0.1f, t);
+
+									projectile->speed.x *= keep;
+									projectile->speed.z *= keep;
+								}
+							}
+						}
+					}
+#else
 					for (i = 0; i < g_Vars.lvupdate60; i++) {
 						sp5dc.x += PALUPF(projectile->speed.x);
 						sp5dc.z += PALUPF(projectile->speed.z);
@@ -7505,6 +7820,7 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 							}
 						}
 					}
+#endif
 
 					sp5c8.x = prop->pos.x;
 					sp5c8.y = prop->pos.y;
@@ -7989,6 +8305,100 @@ void platformDisplaceProps(struct prop *platform, s16 *propnums, struct coord *p
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: cutscene lift sound - a lift that sets off while a cutscene is still
+ * playing (Deep Sea, as the intro hands over) has its start and motor
+ * sounds held back (doorPlayOpeningSound: no default sounds in cutscenes),
+ * and the motor stayed silent until the lift's next stop. The start is
+ * remembered and its sounds are played once the cutscene is over, if the
+ * lift is still on its way.
+ */
+#define LIFTSILENT_SLOTS 4
+static struct prop *g_LiftSilentStart[LIFTSILENT_SLOTS];
+
+static void liftNoteSilentStart(struct prop *prop)
+{
+	s32 i;
+
+	if (!g_Vars.in_cutscene || (prop->obj->flags3 & OBJFLAG3_AUTOCUTSCENESOUNDS)) {
+		return;
+	}
+
+	for (i = 0; i < LIFTSILENT_SLOTS; i++) {
+		if (g_LiftSilentStart[i] == prop) {
+			return;
+		}
+	}
+
+	for (i = 0; i < LIFTSILENT_SLOTS; i++) {
+		if (g_LiftSilentStart[i] == NULL) {
+			g_LiftSilentStart[i] = prop;
+			sysLogPrintf(LOG_NOTE, "LIFT: lift %d is on its way during a cutscene: its sounds wait for the cutscene to end",
+					(s32) (prop - g_Vars.props));
+			return;
+		}
+	}
+}
+
+static void liftResumeSilentStart(struct prop *prop)
+{
+	struct liftobj *lift = (struct liftobj *)prop->obj;
+	s32 i;
+
+	if (g_Vars.in_cutscene) {
+		return;
+	}
+
+	for (i = 0; i < LIFTSILENT_SLOTS; i++) {
+		if (g_LiftSilentStart[i] == prop) {
+			if (lift->levelcur == lift->levelaim) {
+				g_LiftSilentStart[i] = NULL; // nowhere to go
+			} else if ((prop->obj->flags & OBJFLAG_DEACTIVATED) == 0) {
+				// (still deactivated: the script lets it go a moment later)
+				g_LiftSilentStart[i] = NULL;
+				doorPlayOpeningSound(lift->soundtype, prop);
+				sysLogPrintf(LOG_NOTE, "LIFT: lift %d set off after the cutscene: its moving sounds started",
+						(s32) (prop - g_Vars.props));
+			}
+
+			return;
+		}
+	}
+}
+
+/**
+ * A lift a cutscene is moving with an animation: its own movement and
+ * sounds have no business playing now (on its own it could already have set
+ * off before the script deactivated it, and its motor then ran on through
+ * the whole cutscene). Its own sounds are kept off until the cutscene ends,
+ * and if it's on its way somewhere, they start again once it's over.
+ */
+static void liftCutsceneHold(struct prop *prop)
+{
+	struct liftobj *lift = (struct liftobj *)prop->obj;
+
+	if (!g_Vars.in_cutscene || (prop->obj->flags3 & OBJFLAG3_AUTOCUTSCENESOUNDS)) {
+		return;
+	}
+
+	psStopSound(prop, PSTYPE_DOOR, 0);
+
+	if (lift->levelcur != lift->levelaim) {
+		liftNoteSilentStart(prop);
+	}
+}
+
+void liftForgetSilentStarts(void)
+{
+	s32 i;
+
+	for (i = 0; i < LIFTSILENT_SLOTS; i++) {
+		g_LiftSilentStart[i] = NULL;
+	}
+}
+#endif
+
 void liftTick(struct prop *prop)
 {
 	struct liftobj *lift = (struct liftobj *)prop->obj;
@@ -8016,6 +8426,10 @@ void liftTick(struct prop *prop)
 	lift->prevpos.y = prop->pos.y;
 	lift->prevpos.z = prop->pos.z;
 
+#ifndef PLATFORM_N64
+	liftResumeSilentStart(prop);
+#endif
+
 	if (lift->levelcur != lift->levelaim) {
 		// Lift is not at the desired level. So try to move, but not if the lift
 		// is disabled or if the door needs to be closed first.
@@ -8037,6 +8451,9 @@ void liftTick(struct prop *prop)
 
 			if (lift->dist == 0 && lift->speed == 0) {
 				doorPlayOpeningSound(lift->soundtype, lift->base.prop);
+#ifndef PLATFORM_N64
+				liftNoteSilentStart(prop);
+#endif
 
 				if (obj->flags & OBJFLAG_LIFT_TRIGGERDISABLE) {
 					obj->flags &= ~OBJFLAG_LIFT_TRIGGERDISABLE;
@@ -9014,14 +9431,36 @@ void autogunInitMatrices(struct prop *prop, Mtxf *mtx)
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: autogun - turrets (and laptop guns) shot once per N64 frame, but the
+ * port's every-other-60th hack fired two or four times in a row at 120 and 240
+ * FPS. They now shoot 30 times a second at any framerate, each shot counting
+ * the time since the last for its chance of hitting.
+ */
+#define AUTOGUN_STEP240 8
+
+static void autogunTickShootStep(struct prop *autogunprop);
+
 void autogunTickShoot(struct prop *autogunprop)
 {
-#ifndef PLATFORM_N64
-	// HACK: fire every other tick at 60+ fps and every tick at <60 fps
-	if (g_Vars.lvupdate240 <= TICKS(4) && (g_Vars.lvframe60 & 1)) {
-		return;
+	s32 steps = LV_STEPS240(AUTOGUN_STEP240);
+	f32 realupdate = g_Vars.lvupdate60freal;
+
+	if (steps <= 0) {
+		return; // (between steps: the gun and its flashes hold)
 	}
+
+	g_Vars.lvupdate60freal = PALUPF(steps * (AUTOGUN_STEP240 / 4.0f));
+	autogunTickShootStep(autogunprop);
+	g_Vars.lvupdate60freal = realupdate;
+}
+
+static void autogunTickShootStep(struct prop *autogunprop)
+#else
+void autogunTickShoot(struct prop *autogunprop)
 #endif
+{
 	if (!lvIsPaused()) {
 		struct autogunobj *autogun = (struct autogunobj *) autogunprop->obj;
 		struct defaultobj *obj = autogunprop->obj;
@@ -9649,6 +10088,30 @@ void chopperFireRocket(struct chopperobj *chopper, bool side)
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: chopper gun - the helicopter's (and A51 interceptors') gun fired on
+ * every other tick. It now steps 30 times a second (the N64's frames), each
+ * shot counting a step's time towards its chance to hit.
+ */
+#define CHOPPERGUN_STEP240 8
+
+static bool chopperGunStep(void)
+{
+	static s32 frame = -1;
+	static s32 laststep = -1;
+	static bool result = false;
+
+	if (g_Vars.lvframe240 != frame) {
+		frame = g_Vars.lvframe240;
+		result = g_Vars.lvupdate240 > 0 && g_Vars.lvframe240 / CHOPPERGUN_STEP240 != laststep;
+		laststep = g_Vars.lvframe240 / CHOPPERGUN_STEP240;
+	}
+
+	return result;
+}
+#endif
+
 void chopperIncrementBarrel(struct prop *chopperprop, bool firing)
 {
 	struct defaultobj *obj = chopperprop->obj;
@@ -9733,7 +10196,11 @@ void chopperIncrementBarrel(struct prop *chopperprop, bool firing)
 		speedmult = 0.125f;
 
 		if (chopper->barrelrotspeed > 0.0f) {
+#ifndef PLATFORM_N64
+			chopper->barrelrotspeed -= 0.017453292f * LVUPDATE60FREAL(); // MOD: chopper gun
+#else
 			chopper->barrelrotspeed -= 0.017453292f;
+#endif
 		} else {
 			chopper->barrelrotspeed = 0.0f;
 		}
@@ -9772,6 +10239,13 @@ void chopperIncrementBarrel(struct prop *chopperprop, bool firing)
 	chopper->gunturnyspeed60 = gunturnyspeed60;
 	chopper->gunturnxspeed60 = gunturnxspeed60;
 
+#ifndef PLATFORM_N64
+	// MOD: chopper gun - between steps the gun and its flash hold
+	if (!chopperGunStep()) {
+		return;
+	}
+#endif
+
 	if (!(chopper->fireslotthing->unk00 % 2)) {
 		firing = false;
 	}
@@ -9790,7 +10264,18 @@ void chopperIncrementBarrel(struct prop *chopperprop, bool firing)
 		rot.y = sinf(totalrotx);
 		rot.z = cosf(totalroty) * cosf(totalrotx);
 
+#ifndef PLATFORM_N64
+		{
+			// MOD: chopper gun - each shot is a step's worth of time
+			f32 realupdate = g_Vars.lvupdate60freal;
+
+			g_Vars.lvupdate60freal = PALUPF(CHOPPERGUN_STEP240 / 4.0f);
+			projectileCreate(chopperprop, chopper->fireslotthing, &gunpos, &rot, WEAPON_CHOPPERGUN, targetprop);
+			g_Vars.lvupdate60freal = realupdate;
+		}
+#else
 		projectileCreate(chopperprop, chopper->fireslotthing, &gunpos, &rot, WEAPON_CHOPPERGUN, targetprop);
+#endif
 
 		if (rwdata != NULL) {
 			rwdata->visible = true;
@@ -9845,7 +10330,13 @@ void chopperIncrementMovement(struct prop *prop, f32 goalroty, f32 goalrotx, str
 		chopper->power += 0.030833334f * g_Vars.lvupdate60freal;
 	}
 
+#ifndef PLATFORM_N64
+	// MOD: chopper movement - the bob, thrust and drag were applied once per
+	// tick (4 times as often at 240 FPS); now by the tick's time in 60ths
+	chopper->bob += 0.052359f * (g_Vars.lvupdate240 * 0.25f);
+#else
 	chopper->bob += 0.052359f;
+#endif
 
 	if (chopper->bob > M_BADTAU) {
 		chopper->bob = 0.0f;
@@ -9858,6 +10349,17 @@ void chopperIncrementMovement(struct prop *prop, f32 goalroty, f32 goalrotx, str
 
 	dir->y += chopper->bobstrength * sinf(chopper->bob);
 
+#ifndef PLATFORM_N64
+	{
+		f32 t = g_Vars.lvupdate240 * 0.25f;
+
+		f2 = __builtin_powf(PAL ? 0.976f : 0.98f, t); // (the drag, per 60th)
+
+		chopper->vx += dir->x * t;
+		chopper->vy += dir->y * t;
+		chopper->vz += dir->z * t;
+	}
+#else
 	f2 = PAL ? 0.976f : 0.98f;
 
 	for (i = 1; i < g_Vars.lvupdate60; i++) {
@@ -9867,6 +10369,7 @@ void chopperIncrementMovement(struct prop *prop, f32 goalroty, f32 goalrotx, str
 	chopper->vx += dir->x;
 	chopper->vy += dir->y;
 	chopper->vz += dir->z;
+#endif
 
 	chopper->vx *= f2;
 	chopper->vy *= f2;
@@ -10151,6 +10654,9 @@ void chopperTickFall(struct prop *chopperprop)
 
 			chopper->dead = true;
 		} else {
+#ifndef PLATFORM_N64
+			if (LV_STEP240(4)) // MOD: high framerates - crash smoke per 60th
+#endif
 			smokeCreateSimple(&chopperprop->pos, chopperprop->rooms, SMOKETYPE_3);
 			chopperIncrementMovement(chopperprop, goalroty, chopper->rotx < 0 ? M_PI : -M_PI, &speed, false);
 		}
@@ -10476,11 +10982,22 @@ void hovercarTick(struct prop *prop)
 			}
 		} else {
 			if (hovercar->speedtime60 == 0) {
+#ifndef PLATFORM_N64
+				// MOD: hovercar fall - it fell per tick; now per 60th
+				f32 t = g_Vars.lvupdate240 * 0.25f;
+
+				hovercar->speed += 6 * t;
+
+				sp1c0.x = prop->pos.x;
+				sp1c0.y = prop->pos.y - hovercar->speed * t;
+				sp1c0.z = prop->pos.z;
+#else
 				hovercar->speed += 6;
 
 				sp1c0.x = prop->pos.x;
 				sp1c0.y = prop->pos.y - hovercar->speed;
 				sp1c0.z = prop->pos.z;
+#endif
 
 				if (sp1c0.y < hovercar->speedaim) {
 					sp1c0.y = hovercar->speedaim;
@@ -10649,7 +11166,11 @@ void hovercarTick(struct prop *prop)
 		if (hovercar->base.flags & OBJFLAG_HOVERCAR_ISHOVERBOT) {
 			sp188 = 0;
 		} else {
+#ifndef PLATFORM_N64
+			sp188 = smoothLerp60(sp188, -sp184 * 120, 0.1f); // MOD: high framerates - bank by time
+#else
 			sp188 += (-sp184 * 120 - sp188) * 0.1f;
+#endif
 		}
 
 		sp12c.x = ishoverbot ? M_BADTAU - sp18c : 0;
@@ -10986,6 +11507,83 @@ u32 objTick(struct prop *prop)
  * much of the logic is skipped, and only the logic specific to the current
  * player is executed.
  */
+#ifndef PLATFORM_N64
+/**
+ * MOD: cutscene lift sound - a lift a cutscene moves with an animation
+ * (Deep Sea's intro: deactivated, carried down by ANIM_CUT_PAM_INTRO_LIFT)
+ * kept its motor loop going after it had come to rest at the bottom: the
+ * script stops it by its own timer, which can drift from the animation. Once
+ * the lift has moved and then stays still for half a second, its looping
+ * sounds are stopped. The lift itself stays deactivated until the script
+ * lets it go after the cutscene.
+ */
+#define LIFTREST_SLOTS   4
+#define LIFTREST_STILL60 30
+
+static struct {
+	struct prop *prop;
+	struct coord pos;
+	s32 seen60;
+	s32 still60;
+	bool moved;
+	bool done;
+} g_LiftRest[LIFTREST_SLOTS];
+
+static void liftCutsceneRestCheck(struct prop *prop)
+{
+	s32 i;
+	s32 slot = -1;
+	f32 dx, dy, dz, d2;
+
+	for (i = 0; i < LIFTREST_SLOTS; i++) {
+		if (g_LiftRest[i].prop == prop) {
+			slot = i;
+			break;
+		}
+
+		if (slot < 0 || g_LiftRest[i].seen60 < g_LiftRest[slot].seen60) {
+			slot = i;
+		}
+	}
+
+	// A new lift, or one not seen for a while (another cutscene, another stage)
+	if (g_LiftRest[slot].prop != prop
+			|| g_Vars.lvframe60 - g_LiftRest[slot].seen60 > 4
+			|| g_Vars.lvframe60 < g_LiftRest[slot].seen60) {
+		g_LiftRest[slot].prop = prop;
+		g_LiftRest[slot].pos = prop->pos;
+		g_LiftRest[slot].still60 = 0;
+		g_LiftRest[slot].moved = false;
+		g_LiftRest[slot].done = false;
+	}
+
+	g_LiftRest[slot].seen60 = g_Vars.lvframe60;
+
+	dx = prop->pos.x - g_LiftRest[slot].pos.x;
+	dy = prop->pos.y - g_LiftRest[slot].pos.y;
+	dz = prop->pos.z - g_LiftRest[slot].pos.z;
+	d2 = dx * dx + dy * dy + dz * dz;
+	g_LiftRest[slot].pos = prop->pos;
+
+	if (d2 > 0.1f * 0.1f) {
+		// (a jump to where the animation starts isn't a move)
+		if (d2 < 50.0f * 50.0f) {
+			g_LiftRest[slot].moved = true;
+		}
+
+		g_LiftRest[slot].still60 = 0;
+		g_LiftRest[slot].done = false;
+	} else if (g_LiftRest[slot].moved && !g_LiftRest[slot].done) {
+		g_LiftRest[slot].still60 += g_Vars.lvupdate60;
+
+		if (g_LiftRest[slot].still60 >= LIFTREST_STILL60) {
+			g_LiftRest[slot].done = true;
+			psStopRepeatingForProp(prop);
+		}
+	}
+}
+#endif
+
 s32 objTickPlayer(struct prop *prop)
 {
 	bool pass;
@@ -11137,6 +11735,15 @@ s32 objTickPlayer(struct prop *prop)
 
 						if (obj->type == OBJTYPE_LIFT) {
 							liftUpdateTiles((struct liftobj *)obj, false);
+#ifndef PLATFORM_N64
+							// (only while the cutscene holds it: once the script
+							// lets the lift go, its own movement and sounds take over)
+							if (g_Vars.tickmode == TICKMODE_CUTSCENE && (obj->flags & OBJFLAG_DEACTIVATED)) {
+								liftCutsceneRestCheck(prop);
+							}
+
+							liftCutsceneHold(prop);
+#endif
 						}
 
 						sp592 = true;
@@ -20142,7 +20749,10 @@ bool doorCalcIntendedFrac(struct doorobj *door)
 			s32 value = (rngRandom() % 64) + 30;
 
 #ifndef PLATFORM_N64 // emulate low fps cal rate for stuckage test
-			if (((g_Vars.lvframenum % value) == 0)
+			// MOD: door stuckage - counted frames, so at 240 FPS doors stuck
+			// four times as often as at 60; now counts 60ths of a second
+			if (g_Vars.lvupdate60 > 0
+				&& ((g_Vars.lvframe60 % value) == 0)
 				&& ((g_Vars.lvframe60 & 3) == 0)) {
 #else
 			if ((g_Vars.lvframenum % value) == 0) {

@@ -44,6 +44,7 @@
 #include "gbiex.h"
 #include "types.h"
 #ifndef PLATFORM_N64
+#include "math.h" // MOD: gun blocks glares - by joshuarwood (perfect_dark PR #714)
 #include "preprocess.h"
 #include "system.h"
 #include "video.h"
@@ -137,6 +138,7 @@ u16 g_BgFrameCount = 0xfffe;
 s32 g_BgNumPortalCameraCacheItems = 0;
 #ifndef PLATFORM_N64
 bool g_BgHitXluDisabled = false;
+s32 g_SplitscreenGlares = true; // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
 #endif
 
 void bgUnpausePropsInRoom(u32 roomnum, bool tintedglassonly)
@@ -1064,7 +1066,12 @@ Gfx *bgRenderScene(Gfx *gdl)
 			roomnum = 0x71;
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: co-op effects - the star field in co-op/counter-op too
+		if ((PLAYERCOUNT() == 1 || !g_Vars.normmplayerisrunning)
+#else
 		if (PLAYERCOUNT() == 1
+#endif
 				&& (stagenum == STAGE_DEFECTION
 					|| stagenum == STAGE_EXTRACTION
 					|| stagenum == STAGE_TEST_OLD
@@ -1236,7 +1243,11 @@ Gfx *bgRenderArtifacts(Gfx *gdl)
 {
 	s32 i;
 
+#ifdef PLATFORM_N64
 	if (g_Vars.mplayerisrunning == false && g_NumRoomsWithGlares > 0) {
+#else
+	if ((g_Vars.mplayerisrunning == false || g_SplitscreenGlares) && g_NumRoomsWithGlares > 0) { // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
+#endif
 		gdl = artifactsConfigureForGlares(gdl);
 
 		for (i = 0; i < g_NumRoomsWithGlares; i++) {
@@ -1693,6 +1704,9 @@ void bgBuildTables(s32 stagenum)
 
 	for (i = 0; i < g_Vars.roomcount; i++) {
 		g_Rooms[i].vtxbatches = NULL;
+#ifndef PLATFORM_N64
+		g_Rooms[i].shinyxlumask = NULL; // MOD: shiny alpha fix
+#endif
 		g_Rooms[i].numlights = 0;
 		g_Rooms[i].lightindex = 0;
 		g_Rooms[i].flags = 0;
@@ -3033,6 +3047,10 @@ void bgLoadRoom(s32 roomnum)
 		// Create vertex batches - these are used for hit detection
 		bgFindRoomVtxBatches(roomnum);
 
+#ifndef PLATFORM_N64
+		bgBuildShinyXluMask(roomnum); // MOD: shiny alpha fix
+#endif
+
 		g_Rooms[roomnum].flags |= ROOMFLAG_LIGHTS_DIRTY;
 		g_Rooms[roomnum].flags |= ROOMFLAG_BRIGHTNESS_DIRTY_PERM;
 
@@ -3083,6 +3101,13 @@ void bgUnloadRoom(s32 roomnum)
 #endif
 		g_Rooms[roomnum].vtxbatches = NULL;
 	}
+
+#ifndef PLATFORM_N64
+	if (g_Rooms[roomnum].shinyxlumask) { // MOD: shiny alpha fix
+		sysMemFree(g_Rooms[roomnum].shinyxlumask);
+		g_Rooms[roomnum].shinyxlumask = NULL;
+	}
+#endif
 
 	if (g_Rooms[roomnum].gfxdatalen > 0) {
 #ifdef PLATFORM_N64
@@ -3184,7 +3209,13 @@ void bgTickRooms(void)
 	for (i = 1; i < g_Vars.roomcount; i++) {
 		if (g_Rooms[i].loaded240) {
 #if VERSION >= VERSION_NTSC_1_0
+#ifndef PLATFORM_N64
+			// MOD: high framerates - counts 60ths, not frames (rooms out of
+			// view unloaded four times as soon at 240 FPS)
+			g_Rooms[i].loaded240 += g_Vars.lvupdate60;
+#else
 			g_Rooms[i].loaded240++;
+#endif
 #else
 			g_Rooms[i].loaded240 += g_Vars.lvupdate240;
 #endif
@@ -3493,6 +3524,71 @@ void bgFindRoomVtxBatches(s32 roomnum)
 	}
 }
 
+#ifndef PLATFORM_N64
+// MOD: shiny alpha fix - port of the "/shinyalpha" fix by murkantor (perfect_dark_netplay, docs/PORT_SHINY_ALPHA.md)
+//
+// Shiny (env-mapped) room surfaces have their colour alpha scaled by the room's
+// brightness (see roomHighlight in dlights.c), so in dark rooms they fade to
+// nothing. On N64 that only shows on translucent geometry - opaque surfaces
+// are drawn solid whatever the alpha - but fast3d applies the alpha everywhere,
+// so dark shiny walls turn see-through. Record which colour indices are used by
+// the room's translucent (xlu) geometry; roomHighlight then keeps the fade for
+// those (glass) and floors the alpha for everything else.
+void bgBuildShinyXluMask(s32 roomnum)
+{
+	s32 numcolours = g_Rooms[roomnum].gfxdata->numcolours;
+	s32 numwords = (numcolours + 31) / 32;
+	u32 *mask;
+	Gfx *gdl;
+	s32 i;
+	s32 j;
+
+	if (g_Rooms[roomnum].shinyxlumask || numcolours <= 0) {
+		return;
+	}
+
+	mask = sysMemAlloc(numwords * sizeof(u32));
+
+	if (mask == NULL) {
+		return;
+	}
+
+	// memset isn't declared in this unit, so clear it with a loop
+	for (i = 0; i < numwords; i++) {
+		mask[i] = 0;
+	}
+
+	gdl = bgGetNextGdlInLayer(roomnum, NULL, VTXBATCHTYPE_XLU);
+
+	while (gdl) {
+		Vtx *vertices = bgFindVerticesForGdl(roomnum, gdl);
+		s32 colbase = 0;
+
+		for (i = 0; gdl[i].dma.cmd != G_ENDDL; i++) {
+			if (gdl[i].dma.cmd == G_COL) {
+				// The palette base for the vertices that follow
+				colbase = (UNSEGADDR(gdl[i].words.w1) & 0xffffff) / sizeof(Col);
+			} else if (gdl[i].dma.cmd == G_VTX && vertices) {
+				s32 numvertices = (((u32)gdl[i].bytes[GFX_W0_BYTE(1)] >> 4) & 0xf) + 1;
+				Vtx *batchvertices = (Vtx *)((uintptr_t)vertices + (UNSEGADDR(gdl[i].words.w1) & 0xffffff));
+
+				for (j = 0; j < numvertices; j++) {
+					s32 colour = colbase + (batchvertices[j].colour >> 2);
+
+					if (colour >= 0 && colour < numcolours) {
+						mask[colour >> 5] |= 1u << (colour & 31);
+					}
+				}
+			}
+		}
+
+		gdl = bgGetNextGdlInLayer(roomnum, gdl, VTXBATCHTYPE_XLU);
+	}
+
+	g_Rooms[roomnum].shinyxlumask = mask;
+}
+#endif
+
 bool bgTestLineIntersectsIntBbox(struct coord *arg0, struct coord *arg1, s32 *arg2, s32 *arg3)
 {
 	struct coord arg2f;
@@ -3631,6 +3727,338 @@ bool bgTestLineIntersectsBbox(struct coord *arg0, struct coord *arg1, struct coo
 
 	return true;
 }
+
+#ifndef PLATFORM_N64
+
+// MOD: gun blocks glares - by joshuarwood (perfect_dark PR #714)
+bool bgTestLineIntersectsTriangle(struct coord *origin, struct coord *dir, struct coord *point1, struct coord *point2, struct coord *point3, f32 *dist)
+{
+	/**
+	 * Implementation of Moller-Trumbore triangle intersection test
+	 * without backface culling (assumes triangles in forward direction)
+	 *
+	 * See: https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+	 */
+	const f32 epsilon = 1.19e-7;
+
+	struct coord edge1 = {
+	    point2->x - point1->x,
+	    point2->y - point1->y,
+	    point2->z - point1->z};
+
+	struct coord edge2 = {
+	    point3->x - point1->x,
+	    point3->y - point1->y,
+	    point3->z - point1->z};
+
+	struct coord dir_cross_e2 = {
+		dir->y * edge2.z - dir->z * edge2.y,
+		dir->z * edge2.x - dir->x * edge2.z,
+		dir->x * edge2.y - dir->y * edge2.x};
+
+	f32 det =
+		edge1.x * dir_cross_e2.x +
+		edge1.y * dir_cross_e2.y +
+		edge1.z * dir_cross_e2.z;
+
+	if (fabsf(det) < epsilon) return false; // Direction is parallel to triangle
+
+	f32 inv_det = 1.0 / det;
+
+	struct coord s = {
+		origin->x - point1->x,
+		origin->y - point1->y,
+		origin->z - point1->z};
+
+	f32 u = inv_det * (
+		s.x * dir_cross_e2.x +
+		s.y * dir_cross_e2.y +
+		s.z * dir_cross_e2.z);
+
+	if (u < -epsilon || u - 1 > epsilon) return false; // Direction passes outside edge2's bounds
+
+	struct coord s_cross_e1 = {
+		s.y * edge1.z - s.z * edge1.y,
+		s.z * edge1.x - s.x * edge1.z,
+		s.x * edge1.y - s.y * edge1.x};
+
+	f32 v = inv_det * (
+		dir->x * s_cross_e1.x +
+		dir->y * s_cross_e1.y +
+		dir->z * s_cross_e1.z);
+
+	if (v < -epsilon || u + v - 1 > epsilon) return false; // Direction passes outside edge1's bounds
+
+	f32 t = inv_det * (
+		edge2.x * s_cross_e1.x +
+		edge2.y * s_cross_e1.y +
+		edge2.z * s_cross_e1.z);
+
+	// Direction intersects triangle
+	if (t > epsilon) {
+		*dist = t;
+		return true;
+	}
+	return false;
+}
+
+bool bgTestHitOnWeapon(struct model *model, struct coord *origin, struct coord *end, struct coord *dir, Gfx *gdl, Gfx *gdl2, Vtx *vertices, struct coord *bounds, f32 *lowest_dist)
+{
+	s16 triref;
+	s32 i;
+	bool intersectsbbox;
+	s32 count;
+	s32 istart;
+	s32 istop;
+	s32 numvertices;
+	f32 *ptr;
+	Vtx *vtx;
+	struct coord *point1;
+	struct coord *point2;
+	struct coord *point3;
+	u32 word;
+	Gfx *tri4gdl;
+	Mtxf *mtx;
+	struct coord min;
+	struct coord max;
+	bool hit;
+	f32 dist;
+	s32 points[3];
+
+	istart = 16;
+	istop = 0;
+	hit = false;
+
+	while (true) {
+		if (gdl->dma.cmd == G_ENDDL) {
+			if (gdl2 != NULL) {
+				gdl = gdl2;
+				gdl2 = NULL;
+				continue;
+			}
+			break;
+		} else if (gdl->dma.cmd == G_MTX) {
+			word = UNSEGADDR(gdl->words.w1) & 0xffffff;
+			i = word / sizeof(Mtxf);
+			mtx = &model->matrices[i];
+		} else if (gdl->dma.cmd == G_VTX) {
+			count = (gdl->bytes[GFX_W0_BYTE(1)] & 0xf);
+			word = UNSEGADDR(gdl->words.w1) & 0xffffff;
+			numvertices = ((u32) gdl->bytes[GFX_W0_BYTE(1)] >> 4) + 1;
+			vtx = (Vtx *)((uintptr_t)vertices + word);
+
+			if (count < istart) {
+				istart = count;
+			}
+
+			if (numvertices + count > istop) {
+				istop = numvertices + count;
+			}
+
+			ptr = &var800a6470[count * 3];
+
+			while (numvertices > 0) {
+				ptr[0] = vtx->x;
+				ptr[1] = vtx->y;
+				ptr[2] = vtx->z;
+
+				mtx4TransformVecInPlace(mtx, (struct coord *) ptr);
+
+				numvertices--;
+				ptr += 3;
+				vtx++;
+			}
+
+			ptr = &var800a6470[istart];
+
+			min.x = ptr[0];
+			max.x = ptr[0];
+			min.y = ptr[1];
+			max.y = ptr[1];
+			min.z = ptr[2];
+			max.z = ptr[2];
+
+			for (i = istart; i < istop; i++) {
+				if (ptr[0] < min.x) {
+					min.x = ptr[0];
+				}
+
+				if (ptr[1] < min.y) {
+					min.y = ptr[1];
+				}
+
+				if (ptr[2] < min.z) {
+					min.z = ptr[2];
+				}
+
+				if (ptr[0] > max.x) {
+					max.x = ptr[0];
+				}
+
+				if (ptr[1] > max.y) {
+					max.y = ptr[1];
+				}
+
+				if (ptr[2] > max.z) {
+					max.z = ptr[2];
+				}
+
+				ptr += 3;
+			}
+
+			// Update external min, max bounds when present
+			if (bounds != NULL) {
+				if (bounds[0].x > min.x) bounds[0].x = min.x;
+				if (bounds[0].y > min.y) bounds[0].y = min.y;
+				if (bounds[0].z > min.z) bounds[0].z = min.z;
+				if (bounds[1].x < max.x) bounds[1].x = max.x;
+				if (bounds[1].y < max.y) bounds[1].y = max.y;
+				if (bounds[1].z < max.z) bounds[1].z = max.z;
+			}
+
+			if ((origin->x < min.x && end->x < min.x)
+					|| (origin->x > max.x && end->x > max.x)
+					|| (origin->y < min.y && end->y < min.y)
+					|| (origin->y > max.y && end->y > max.y)
+					|| (origin->z < min.z && end->z < min.z)
+					|| (origin->z > max.z && end->z > max.z)) {
+				intersectsbbox = false;
+			} else {
+				intersectsbbox = bgTestLineIntersectsBbox(origin, dir, &min, &max);
+			}
+		} else {
+			if (!intersectsbbox) {
+				gdl++;
+				continue;
+			}
+
+			if ((gdl->dma.cmd != G_TRI1 && gdl->dma.cmd != G_TRI4)) {
+				gdl++;
+				continue;
+			}
+
+			if (gdl->dma.cmd == G_TRI1) {
+				i = 0;
+				triref = 0;
+				points[0] = gdl->tri.tri.v[GFX_TRI_VTX(0)] / 10;
+				points[1] = gdl->tri.tri.v[GFX_TRI_VTX(1)] / 10;
+				points[2] = gdl->tri.tri.v[GFX_TRI_VTX(2)] / 10;
+			} else if (gdl->dma.cmd == G_TRI4) {
+				tri4gdl = gdl;
+				i = 3;
+				triref = 1;
+				points[0] = gdl->tri4.x1;
+				points[1] = gdl->tri4.y1;
+				points[2] = gdl->tri4.z1;
+			}
+
+			do {
+				if (points[0] == 0 && points[1] == 0 && points[2] == 0) {
+					break;
+				}
+
+				point1 = (struct coord *) (var800a6470 + points[0] * 3);
+				point2 = (struct coord *) (var800a6470 + points[1] * 3);
+				point3 = (struct coord *) (var800a6470 + points[2] * 3);
+
+				min.x = point1->x;
+				max.x = point1->x;
+
+				if (point2->x < min.x) {
+					min.x = point2->x;
+				}
+
+				if (point2->x > max.x) {
+					max.x = point2->x;
+				}
+
+				if (point3->x < min.x) {
+					min.x = point3->x;
+				}
+
+				if (point3->x > max.x) {
+					max.x = point3->x;
+				}
+
+				if (!(origin->x < min.x && end->x < min.x) && !(origin->x > max.x && end->x > max.x)) {
+					min.z = point1->z;
+					max.z = point1->z;
+
+					if (point2->z < min.z) {
+						min.z = point2->z;
+					}
+
+					if (point2->z > max.z) {
+						max.z = point2->z;
+					}
+
+					if (point3->z < min.z) {
+						min.z = point3->z;
+					}
+
+					if (point3->z > max.z) {
+						max.z = point3->z;
+					}
+
+					if (!(origin->z < min.z && end->z < min.z) && !(origin->z > max.z && end->z > max.z)) {
+						min.y = point1->y;
+						max.y = point1->y;
+
+						if (point2->y < min.y) {
+							min.y = point2->y;
+						}
+
+						if (point2->y > max.y) {
+							max.y = point2->y;
+						}
+
+						if (point3->y < min.y) {
+							min.y = point3->y;
+						}
+
+						if (point3->y > max.y) {
+							max.y = point3->y;
+						}
+
+						if (!(origin->y < min.y && end->y < min.y) && !(origin->y > max.y && end->y > max.y)) {
+							if (bgTestLineIntersectsBbox(origin, dir, &min, &max)
+									&& bgTestLineIntersectsTriangle(origin, dir, point1, point2, point3, &dist)) {
+								hit = true;
+								if (dist < *lowest_dist) {
+									*lowest_dist = dist;
+								}
+							}
+						}
+					}
+				}
+
+				i--;
+
+				if (i == 2) {
+					points[0] = tri4gdl->tri4.x2;
+					points[1] = tri4gdl->tri4.y2;
+					points[2] = tri4gdl->tri4.z2;
+					triref = 2;
+				} else if (i == 1) {
+					points[0] = tri4gdl->tri4.x3;
+					points[1] = tri4gdl->tri4.y3;
+					points[2] = tri4gdl->tri4.z3;
+					triref = 3;
+				} else if (i == 0) {
+					points[0] = tri4gdl->tri4.x4;
+					points[1] = tri4gdl->tri4.y4;
+					points[2] = tri4gdl->tri4.z4;
+					triref = 1;
+				}
+			} while (i >= 0);
+		}
+		gdl++;
+	}
+
+	return hit;
+}
+
+#endif
 
 bool bgTestHitOnObj(struct coord *arg0, struct coord *arg1, struct coord *arg2, Gfx *gdl,
 		Gfx *gdl2, Vtx *vertices, struct hitthing *hitthing)
@@ -4029,6 +4457,15 @@ bool bgTestHitOnChr(struct model *model, struct coord *arg1, struct coord *arg2,
 			min.z = ptr[2];
 			max.z = ptr[2];
 
+			/**
+			 * @bug: Advancing the pointer before the next loop
+			 * results in overflow into empty memory on the last
+			 * iteration. This produces incorrect min/max values
+			 * for the box intersection test, but luckily it usually
+			 * gets corrected by the detailed triangle test so the
+			 * net impact on N64 is extra CPU usage. We could skip
+			 * this on PC to obtain the correct min/max values.
+			 */
 			ptr += 3;
 
 			for (i = spdc; i < spd8; i++) {
@@ -6428,7 +6865,7 @@ void bgCalculateGlaresForVisibleRooms(void)
 	// surfaces before testing for light obstructions
 	g_BgHitXluDisabled = true;
 
-	if (!g_Vars.mplayerisrunning) {
+	if (!g_Vars.mplayerisrunning || g_SplitscreenGlares) { // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
 		for (i = 1; i < g_Vars.roomcount; i++) {
 			if (g_Rooms[i].flags & ROOMFLAG_ONSCREEN) {
 				artifactsCalculateGlaresForRoom(i);

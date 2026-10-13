@@ -898,7 +898,11 @@ void bgrabHandleActivate(void)
 	}
 }
 
+#ifndef PLATFORM_N64
+void bgrabUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, f32 mult)
+#else
 void bgrabUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, s32 mult)
+#endif
 {
 	if (targetspeed < g_Vars.currentplayer->speedstrafe) {
 		g_Vars.currentplayer->speedstrafe -= PALUPF(accelspeed * mult);
@@ -939,6 +943,20 @@ void bgrabUpdateSpeedForwards(f32 target, f32 speed)
 void bgrabApplyMoveData(struct movedata *data)
 {
 	// Sideways
+#ifndef PLATFORM_N64
+	// MOD: high framerates - by time, not input samples (see bwalkApplyMoveData)
+	if (data->digitalstepleft) {
+		bgrabUpdateSpeedSideways(-1, 0.2f / 3.0f, g_Vars.lvupdate60f);
+	} else if (data->digitalstepright) {
+		bgrabUpdateSpeedSideways(1, 0.2f / 3.0f, g_Vars.lvupdate60f);
+	} else if (data->unk14 == 0) {
+		bgrabUpdateSpeedSideways(0, 0.2f / 3.0f, g_Vars.lvupdate60f);
+	}
+
+	if (data->unk14) {
+		bgrabUpdateSpeedSideways(data->analogstrafe * 0.014285714365542f, 0.2f / 3.0f, g_Vars.lvupdate60f);
+	}
+#else
 	if (data->digitalstepleft) {
 		bgrabUpdateSpeedSideways(-1, 0.2f / 3.0f, data->digitalstepleft);
 	} else if (data->digitalstepright) {
@@ -950,6 +968,7 @@ void bgrabApplyMoveData(struct movedata *data)
 	if (data->unk14) {
 		bgrabUpdateSpeedSideways(data->analogstrafe * 0.014285714365542f, 0.2f / 3.0f, g_Vars.lvupdate60);
 	}
+#endif
 
 	// Forward/back
 	if (data->digitalstepforward) {

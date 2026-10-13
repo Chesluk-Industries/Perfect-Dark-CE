@@ -54,6 +54,7 @@
 #include "data.h"
 #include "types.h"
 #ifndef PLATFORM_N64
+#include "game/artifact.h" // MOD: gun blocks glares - by joshuarwood (perfect_dark PR #714)
 #include "game/stagetable.h"
 #include "video.h"
 #include "platform.h"
@@ -73,6 +74,59 @@
 
 // Max downwards pitch when changing guns or reloading a classic gun
 #define MAX_PITCH 0.87252569198608f
+
+/**
+ * MOD: smooth gun - the gun's animation moved in whole 60ths, so above 60 FPS
+ * it moved on one frame and held for the next ones. The PC port uses the PAL
+ * versions' fractional animation frames, with animframeinc in 240ths.
+ */
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64)
+#define GUNANIM_FREAL
+#endif
+
+// MOD: smooth gun - the part of a 60th not yet counted in the gun's 60th
+// counters, added by the arm's lowering and raising and the recoil kick
+#ifdef PLATFORM_N64
+#define GUNSUBSTEP 0
+#else
+#define GUNSUBSTEP (g_Vars.lvupdate240rem * 0.25f)
+#endif
+
+#ifndef PLATFORM_N64
+/**
+ * MOD: smooth gun - a shot's muzzle flash and shake were shown on its tick
+ * only, a quarter of a 60th at 240 FPS: they're held, unchanged, for a 60th.
+ */
+struct gunfirevis {
+	s32 firestamp;   // lvframe240 of the last shot
+	s32 flashstamp;  // lvframe240 of the last shot with a flash
+	f32 shake[3];
+	f32 flashscale;
+	f32 flashrot;
+};
+
+static struct gunfirevis g_GunFireVis[MAX_PLAYERS][2];
+
+static struct gunfirevis *bgunFireVis(struct hand *hand)
+{
+	s32 h = (hand == &g_Vars.currentplayer->hands[HAND_LEFT]) ? 1 : 0;
+
+	return &g_GunFireVis[g_Vars.currentplayernum][h];
+}
+
+static bool bgunFireVisHeld(s32 stamp)
+{
+	s32 since = g_Vars.lvframe240 - stamp;
+
+	return since >= 0 && since < 4;
+}
+#endif
+
+#ifdef PLATFORM_N64
+#define GUNANIM_INC60(inc) PALUPF(inc)
+#else
+#define GUNANIM_INC60(inc) ((inc) * 0.25f)
+#endif
 
 #if VERSION >= VERSION_PAL_BETA
 struct sndstate *g_CasingAudioHandles[2];
@@ -631,7 +685,7 @@ f32 bgun0f09815c(struct hand *hand)
 
 void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 {
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 	f32 s4;
 	f32 s2;
 #else
@@ -659,7 +713,7 @@ void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 	if ((hand->animmode == (u32)HANDANIMMODE_BUSY) | (hand->animload >= 0)) {
 		if (hand->gangstarot > 0.0f) {
 			hand->animframeinc = 0;
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 			hand->animframeincfreal = 0.0f;
 #endif
 		}
@@ -681,21 +735,21 @@ void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 
 			hand->animload = -1;
 			hand->animmode = HANDANIMMODE_BUSY;
-#if VERSION >= VERSION_PAL_BETA
-			hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * PALUPF(hand->animframeinc);
+#ifdef GUNANIM_FREAL
+			hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * GUNANIM_INC60(hand->animframeinc);
 #endif
 		}
 
 		if (hand->unk0cc8_02) {
 			hand->animframeinc = 0;
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 			hand->animframeincfreal = 0.0f;
 #endif
 		}
 
 		s4 = bgun0f09815c(hand);
 
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 		s2 = hand->animframeincfreal + s4;
 #else
 		s2 = hand->animframeinc + s4;
@@ -746,17 +800,23 @@ void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 						case GUNCMD_WAITFORZRELEASED:
 							if (hand->unk0cc8_01) {
 								if (s2 >= cmd->unk02 && s4 < cmd->unk02 && s4 < s2) {
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 									f32 tmp = cmd->unk02 - bgun0f09815c(hand);
+#ifndef PLATFORM_N64
+									tmp *= 1.0f - __builtin_powf(0.5f, g_Vars.lvupdate240 * 0.25f); // half the gap per 60th
+#else
 									tmp /= 2;
+#endif
 
 									if (hand->animframeincfreal > tmp) {
 #if PAL
 										hand->animframeinc = tmp * 0.83333333f / modelGetAbsAnimSpeed(&hand->gunmodel);
+#elif !defined(PLATFORM_N64)
+										hand->animframeinc = tmp * 4.0f / modelGetAbsAnimSpeed(&hand->gunmodel);
 #else
 										hand->animframeinc = tmp / modelGetAbsAnimSpeed(&hand->gunmodel);
 #endif
-										hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * PALUPF(hand->animframeinc);
+										hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * GUNANIM_INC60(hand->animframeinc);
 									}
 
 									s2 = hand->animframeincfreal + s4;
@@ -775,7 +835,7 @@ void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 							break;
 						case GUNCMD_REPEATUNTILFULL:
 							if (hand->incrementalreloading && s2 >= cmd->unk02 && s4 < cmd->unk02 && s4 < s2) {
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 								f32 sp78 = s2;
 
 								while (sp78 >= cmd->unk02) {
@@ -812,8 +872,13 @@ void bgun0f0981e8(struct hand *hand, struct modeldef *modeldef)
 			}
 		}
 
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
+#ifndef PLATFORM_N64
+		// (animframeinc is in 240ths)
+		modelSetAnimPlaySpeed(&hand->gunmodel, 1.0f, 0);
+#else
 		modelSetAnimPlaySpeed(&hand->gunmodel, PALUPF(4.0f), 0);
+#endif
 		modelTickAnimQuarterSpeed(&hand->gunmodel, hand->animframeinc, true);
 #else
 		modelTickAnim(&hand->gunmodel, hand->animframeinc, true);
@@ -949,7 +1014,7 @@ bool bgun0f098a44(struct hand *hand, s32 time)
 	}
 
 	if (waittimekeyframe >= 0) {
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 		if (hand->unk0cc8_01 && bgun0f09815c(hand) <= zreleasekeyframe) {
 			return false;
 		}
@@ -963,6 +1028,18 @@ bool bgun0f098a44(struct hand *hand, s32 time)
 		return (bgun0f09815c(hand) + hand->animframeinc >= waittimekeyframe);
 #endif
 	}
+
+#ifndef PLATFORM_N64
+	// MOD: smooth gun - with no keyframe to wait for, wait for a 60th of the
+	// animation, as at 60 FPS (above it the crossbow's bolt went off before
+	// the animation had moved). Not while turned gangsta-style: the animation
+	// is held still then.
+	if (hand->animmode == HANDANIMMODE_BUSY && hand->gangstarot <= 0.0f) {
+		f32 speed = modelGetAbsAnimSpeed(&hand->gunmodel);
+
+		return bgun0f09815c(hand) + 0.001f >= speed;
+	}
+#endif
 
 	return true;
 }
@@ -1215,7 +1292,7 @@ s32 bgunTickIncIdle(struct handweaponinfo *info, s32 handnum, struct hand *hand,
 
 	hand->lastdirvalid = false;
 	hand->burstbullets = 0;
-#if VERSION < VERSION_PAL_BETA
+#ifndef GUNANIM_FREAL
 	hand->animframeincfreal = hand->animframeinc;
 #endif
 	hand->shotremainder = 0;
@@ -1385,6 +1462,15 @@ s32 bgunTickIncIdle(struct handweaponinfo *info, s32 handnum, struct hand *hand,
 
 void bgunSetArmPitch(struct hand *hand, f32 angle)
 {
+#ifndef PLATFORM_N64
+	// MOD: smooth gun - with the part step added, don't go past the ends
+	if (angle < 0.0f) {
+		angle = 0.0f;
+	} else if (angle > MAX_PITCH) {
+		angle = MAX_PITCH;
+	}
+#endif
+
 	hand->useposrot = true;
 
 	mtx4LoadXRotation(angle, &hand->posrotmtx);
@@ -1414,13 +1500,13 @@ s32 bgunTickIncAutoSwitch(struct handweaponinfo *info, s32 handnum, struct hand 
 		if (hand->stateframes >= delay) {
 			hand->stateminor++; // to HANDSTATEMINOR_AUTOSWITCH_DELETE
 		} else {
-			bgunSetArmPitch(hand, hand->stateframes * MAX_PITCH / delay);
+			bgunSetArmPitch(hand, (hand->stateframes + GUNSUBSTEP) * MAX_PITCH / delay);
 		}
 	}
 
 	if (hand->stateminor == HANDSTATEMINOR_AUTOSWITCH_DELETE) {
 		hand->lastdirvalid = false;
-#if VERSION < VERSION_PAL_BETA
+#ifndef GUNANIM_FREAL
 		hand->animframeincfreal = hand->animframeinc;
 #endif
 		hand->shotremainder = 0;
@@ -1643,7 +1729,7 @@ s32 bgunTickIncReload(struct handweaponinfo *info, s32 handnum, struct hand *han
 			hand->count60 = 0;
 			hand->count = 0;
 		} else {
-			bgunSetArmPitch(hand, hand->count60 * MAX_PITCH / TICKS(16));
+			bgunSetArmPitch(hand, (hand->count60 + GUNSUBSTEP) * MAX_PITCH / TICKS(16));
 		}
 	}
 
@@ -1719,7 +1805,7 @@ s32 bgunTickIncReload(struct handweaponinfo *info, s32 handnum, struct hand *han
 				return lvupdate;
 			}
 		} else {
-			bgunSetArmPitch(hand, (TICKS(23) - hand->count60) * MAX_PITCH / TICKS(23));
+			bgunSetArmPitch(hand, (TICKS(23) - hand->count60 - GUNSUBSTEP) * MAX_PITCH / TICKS(23));
 		}
 	}
 
@@ -2121,7 +2207,18 @@ bool bgun0f09aba4(struct hand *hand, struct handweaponinfo *info, s32 handnum, s
 
 		if (hand->stateflags & HANDSTATEFLAG_00000040) {
 			if (unk27 > frames - hand->statevar1) {
+#ifndef PLATFORM_N64
+				// MOD: smooth gun - the kick moves by the part step too
+				f32 left = unk27 - frames + hand->statevar1 - GUNSUBSTEP;
+
+				if (left < 0.0f) {
+					left = 0.0f;
+				}
+
+				mult1 = cosf(left * 1.5707963705063f / (f32)unk27) * 0.5f + 0.5f;
+#else
 				mult1 = cosf((f32)(unk27 - frames + hand->statevar1) * 1.5707963705063f / (f32)unk27) * 0.5f + 0.5f;
+#endif
 
 				hand->rotxoffset = modelTweenRotAxis(hand->rotxstart, hand->rotxend, mult1);
 				hand->useposrot = true;
@@ -2157,11 +2254,28 @@ bool bgun0f09aba4(struct hand *hand, struct handweaponinfo *info, s32 handnum, s
 			hand->posend.y = 0;
 			hand->posend.z = (weapondef->posz - hand->aimpos.z) * recoildist / 1000.0f;
 
+#ifndef PLATFORM_N64
+			{
+				// MOD: smooth gun - the kick moves by the part step too
+				f32 fframes = frames + GUNSUBSTEP;
+
+				if (fframes > sum) {
+					fframes = sum;
+				}
+
+				if (fframes < unk24) {
+					mult2 = sinf(fframes * 1.5707963705063f / (f32)unk24);
+				} else {
+					mult2 = cosf((fframes - unk24) * M_PI / (f32)unk25) * 0.5f + 0.5f;
+				}
+			}
+#else
 			if (frames < unk24) {
 				mult2 = sinf(frames * 1.5707963705063f / (f32)unk24);
 			} else {
 				mult2 = cosf((f32)(frames - unk24) * M_PI / (f32)unk25) * 0.5f + 0.5f;
 			}
+#endif
 
 			hand->rotxoffset = modelTweenRotAxis(hand->rotxstart, hand->rotxend, mult2);
 			hand->useposrot = true;
@@ -2941,7 +3055,7 @@ s32 bgunTickIncChangeGun(struct handweaponinfo *info, s32 handnum, struct hand *
 				}
 			}
 		} else {
-			bgunSetArmPitch(hand, hand->stateframes * MAX_PITCH / delay);
+			bgunSetArmPitch(hand, (hand->stateframes + GUNSUBSTEP) * MAX_PITCH / delay);
 		}
 	}
 
@@ -3163,7 +3277,7 @@ s32 bgunTickIncChangeGun(struct handweaponinfo *info, s32 handnum, struct hand *
 			hand->count60 = 0;
 			hand->count = 0;
 		} else {
-			bgunSetArmPitch(hand, (delay - hand->count60) * MAX_PITCH / delay);
+			bgunSetArmPitch(hand, (delay - hand->count60 - GUNSUBSTEP) * MAX_PITCH / delay);
 		}
 	}
 
@@ -3293,9 +3407,13 @@ void bgunTickHand(s32 handnum)
 
 	lvupdate = g_Vars.lvupdate60;
 
+#ifndef PLATFORM_N64
+	hand->animframeinc = g_Vars.lvupdate240; // MOD: smooth gun (in 240ths)
+#else
 	hand->animframeinc = g_Vars.lvupdate60;
-#if VERSION >= VERSION_PAL_BETA
-	hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * PALUPF(hand->animframeinc);
+#endif
+#ifdef GUNANIM_FREAL
+	hand->animframeincfreal = modelGetAbsAnimSpeed(&hand->gunmodel) * GUNANIM_INC60(hand->animframeinc);
 #else
 	hand->animframeincfreal += PALUPF(g_Vars.lvupdate60);
 #endif
@@ -3587,7 +3705,11 @@ void bgun0f09d8dc(f32 breathing, f32 arg1, f32 arg2, f32 arg3, f32 arg4)
 	}
 
 	if (player->syncchange + sp4c > 0.0f) {
+#ifndef PLATFORM_N64
+		player->gunsync += player->syncchange * g_Vars.lvupdate60freal; // MOD: smooth speed (was per tick)
+#else
 		player->gunsync += player->syncchange;
+#endif
 	}
 
 	if (player->gunsync > 0.5f) {
@@ -7358,6 +7480,28 @@ void bgun0f0a4e44(struct hand *hand, struct weapon *weapondef, struct modeldef *
 	index = hand->burstbullets % maxburst;
 	shotstotake = hand->shotstotake;
 
+#ifndef PLATFORM_N64
+	{
+		// MOD: smooth gun - the same flash for the 60th it's held
+		struct gunfirevis *vis = bgunFireVis(hand);
+
+		if (hand->flashon) {
+			vis->flashscale = RANDOMFRAC() * 0.25f + 1.0f;
+
+			if (funcdef && (funcdef->flags & FUNCFLAG_00000001)) {
+				RANDOMFRAC();
+			}
+
+			vis->flashrot = RANDOMFRAC() * 0.3 - 0.15;
+		}
+
+		spb4 = vis->flashscale;
+		muzzlez = weapondef->muzzlez;
+
+		mtx4LoadIdentity(&spd8);
+		mtx4LoadZRotation(vis->flashrot, &spd8);
+	}
+#else
 	spb4 = RANDOMFRAC() * 0.25f + 1.0f;
 	muzzlez = weapondef->muzzlez;
 
@@ -7368,6 +7512,7 @@ void bgun0f0a4e44(struct hand *hand, struct weapon *weapondef, struct modeldef *
 	}
 
 	mtx4LoadZRotation((RANDOMFRAC() * 0.3 - 0.15), &spd8);
+#endif
 
 	mtx = (Mtxf *)allocation;
 	mtx += mtxindex;
@@ -7647,11 +7792,31 @@ void bgun0f0a5550(s32 handnum)
 	sp274.z += bgunGetFovOffsetZ();
 #endif
 
+#ifndef PLATFORM_N64
+	if (shootfunc && g_Vars.lvupdate240 != 0 && shootfunc->recoilsettings != NULL) {
+		// MOD: smooth gun - the shake is held for a 60th after a shot
+		struct gunfirevis *vis = bgunFireVis(hand);
+
+		if (hand->firing) {
+			vis->firestamp = g_Vars.lvframe240;
+			vis->shake[0] = (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->xrange * hand->finalmult[0];
+			vis->shake[1] = (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->yrange * hand->finalmult[0];
+			vis->shake[2] = (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->zrange * hand->finalmult[0];
+		}
+
+		if (hand->firing || bgunFireVisHeld(vis->firestamp)) {
+			sp274.x += vis->shake[0];
+			sp274.y += vis->shake[1];
+			sp274.z += vis->shake[2];
+		}
+	}
+#else
 	if (hand->firing && shootfunc && g_Vars.lvupdate240 != 0 && shootfunc->recoilsettings != NULL) {
 		sp274.x += (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->xrange * hand->finalmult[0];
 		sp274.y += (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->yrange * hand->finalmult[0];
 		sp274.z += (RANDOMFRAC() - 0.5f) * shootfunc->recoilsettings->zrange * hand->finalmult[0];
 	}
+#endif
 
 	hand->fspare1 = (player->crosspos2[0] - camGetScreenLeft() - camGetScreenWidth() * 0.5f) * weapondef->aimsettings->guntransside / (camGetScreenWidth() * 0.5f);
 
@@ -7816,7 +7981,7 @@ void bgun0f0a5550(s32 handnum)
 		{
 			bool a0 = true;
 			struct modelrenderdata renderdata = {NULL, true, 3};
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 			bool a3 = false;
 #endif
 			s32 spcc;
@@ -7874,7 +8039,14 @@ void bgun0f0a5550(s32 handnum)
 				a0 = false;
 			}
 
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
+#ifndef PLATFORM_N64
+			// MOD: smooth gun - at fractional frames the fast matrix code
+			// (modelasm) left some joints still on some ticks (two-handed
+			// reloads, the shotgun's pump stuttered): every gun animation uses
+			// the full matrix code, not just PAL's list below
+			a3 = true;
+#else
 			switch (modelGetAnimNum(&hand->gunmodel)) {
 			case ANIM_GUN_CROSSBOW_EQUIP:
 			case ANIM_GUN_LAPTOP_EQUIP:
@@ -7895,6 +8067,7 @@ void bgun0f0a5550(s32 handnum)
 				break;
 			}
 #endif
+#endif
 
 			if (a0) {
 				if (player->hands[HAND_RIGHT].unk0dd4 == -1) {
@@ -7905,7 +8078,7 @@ void bgun0f0a5550(s32 handnum)
 					renderdata.unk00 = &sp84;
 					renderdata.unk10 = player->hands[HAND_RIGHT].unk0dd8;
 
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 					var8005efd8_2 = true;
 
 					if (a3) {
@@ -7937,7 +8110,7 @@ void bgun0f0a5550(s32 handnum)
 					spc4++;
 				}
 			} else {
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 				var8005efd8_2 = true;
 
 				if (a3) {
@@ -8028,7 +8201,17 @@ void bgun0f0a5550(s32 handnum)
 
 				hand->muzzlez = -((Mtxf *)((uintptr_t)mtxallocation + sp6c * sizeof(Mtxf)))->m[3][2];
 
+#ifndef PLATFORM_N64
+				// MOD: smooth gun - the flash is held for a 60th after a shot
+				if (hand->flashon && g_Vars.lvupdate240 != 0) {
+					bgunFireVis(hand)->flashstamp = g_Vars.lvframe240;
+				}
+
+				if ((hand->flashon || bgunFireVisHeld(bgunFireVis(hand)->flashstamp))
+						&& sp1e0 > 0 && weaponnum != WEAPON_SHOTGUN && g_Vars.lvupdate240 != 0) {
+#else
 				if (hand->flashon && sp1e0 > 0 && weaponnum != WEAPON_SHOTGUN && g_Vars.lvupdate240 != 0) {
+#endif
 					bgun0f0a4e44(hand, weapondef, modeldef, funcdef, sp1e0, mtxallocation, weaponnum, sp1e4, sp6c, &sp234, &sp1f4);
 				}
 			} else if (weaponnum == WEAPON_GRENADE
@@ -8102,7 +8285,7 @@ void bgun0f0a5550(s32 handnum)
 
 	hand->animframeinc = 0;
 
-#if VERSION >= VERSION_PAL_BETA
+#ifdef GUNANIM_FREAL
 	hand->animframeincfreal = 0;
 #endif
 }
@@ -8260,7 +8443,12 @@ void bgunTickGameplay2(void)
 		bgunTickMaulerCharge();
 	}
 
+	// MOD: slow motion - not in a frame slow motion skips (see lvIsSlowMotionSkip)
+#ifndef PLATFORM_N64
+	if (g_Vars.lvupdate240 == 0 && !lvIsSlowMotionSkip()) {
+#else
 	if (g_Vars.lvupdate240 == 0) {
+#endif
 		for (i = 0; i < 2; i++) {
 			hand = &player->hands[i];
 
@@ -11000,6 +11188,9 @@ void bgunRender(Gfx **gdlptr)
 		weaponnum = bgunGetWeaponNum2(i);
 
 		if (hand->visible) {
+#ifndef PLATFORM_N64
+			beamFollowHand(i); // MOD: high framerates - the laser stream stays on the barrel
+#endif
 			gdl = beamRender(gdl, &hand->beam, 0, 0);
 
 			if (weaponHasFlag(hand->gset.weaponnum, WEAPONFLAG_00008000)) {
@@ -11167,7 +11358,11 @@ void bgunRender(Gfx **gdlptr)
 				modelRender(&renderdata, &hand->handmodel);
 				renderdata.envcolour = prevcolour;
 			}
-
+#ifndef PLATFORM_N64
+			// MOD: gun blocks glares - by joshuarwood (perfect_dark PR #714)
+			// Update light artifacts to account for gun and hand models
+			artifactsUpdateGlaresForPlayer(&hand->gunmodel, &hand->handmodel, player->gunctrl.handmodeldef && renderhand, 1.5, 1000);
+#endif
 			// Clean up
 			gdl = renderdata.gdl;
 

@@ -14,6 +14,7 @@
 #include "video.h"
 #include "input.h"
 #include "config.h"
+#include "audio.h" // MOD: surround 5.1
 
 static s32 g_ExtMenuPlayer = 0;
 static struct menudialogdef *g_ExtNextDialog = NULL;
@@ -947,6 +948,20 @@ static MenuItemHandlerResult menuhandlerGeMuzzleFlashes(s32 operation, struct me
 	return 0;
 }
 
+// MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
+static MenuItemHandlerResult menuhandlerSplitscreenGlares(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_SplitscreenGlares;
+	case MENUOP_SET:
+		g_SplitscreenGlares = data->checkbox.value;
+		break;
+	}
+
+	return 0;
+}
+
 static MenuItemHandlerResult menuhandlerUncapTickrate(s32 operation, struct menuitem *item, union handlerdata *data)
 {
 	switch (operation) {
@@ -1030,6 +1045,37 @@ static MenuItemHandlerResult menuhandlerOverexposureScale(s32 operation, struct 
 		break;
 	case MENUOP_SET:
 		videoSetOverexposureScale((f32)data->slider.value / 10.f);
+		break;
+	}
+
+	return 0;
+}
+
+// MOD: Video.UnlimitedDecals (applies from the next level load)
+static MenuItemHandlerResult menuhandlerUnlimitedDecals(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_UnlimitedDecals;
+	case MENUOP_SET:
+		g_UnlimitedDecals = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+
+// MOD: decal edge clamp (Video.DecalClamp)
+extern s32 g_DecalClamp;
+
+static MenuItemHandlerResult menuhandlerDecalClamp(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_DecalClamp;
+	case MENUOP_SET:
+		g_DecalClamp = data->checkbox.value ? 1 : 0;
 		break;
 	}
 
@@ -1158,6 +1204,22 @@ struct menuitem g_ExtendedVideoMenuItems[] = {
 		menuhandlerTexDetail,
 	},
 	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Unlimited Decals",
+		0,
+		menuhandlerUnlimitedDecals, // MOD
+	},
+	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Clamp Decals to Edges",
+		0,
+		menuhandlerDecalClamp, // MOD: decal edge clamp
+	},
+	{
 		MENUITEMTYPE_SEPARATOR,
 		0,
 		0,
@@ -1180,6 +1242,14 @@ struct menuitem g_ExtendedVideoMenuItems[] = {
 		(uintptr_t)"GE64-style Muzzle Flashes",
 		0,
 		menuhandlerGeMuzzleFlashes,
+	},
+	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Splitscreen Light Glares",
+		0,
+		menuhandlerSplitscreenGlares,
 	},
 	{
 		MENUITEMTYPE_SLIDER,
@@ -1254,6 +1324,153 @@ static MenuItemHandlerResult menuhandlerDisableMpDeathMusic(s32 operation, struc
 	return 0;
 }
 
+// MOD: surround 5.1 - output option, status, levels and speaker test
+
+static bool surroundSelected(void)
+{
+	return g_SoundMode == SOUNDMODE_SURROUND;
+}
+
+// 5.1 output, levels and the speaker test need the Sound option on Surround
+// and a device with 5.1 speakers (a stereo device just gets Dolby Surround)
+static bool surround51Usable(void)
+{
+	return surroundSelected() && audioGetDeviceChannels() >= 6;
+}
+
+static MenuItemHandlerResult menuhandlerSurround51(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !surround51Usable();
+	case MENUOP_GET:
+		return audioGetSurround51() && audioGetDeviceChannels() >= 6;
+	case MENUOP_SET:
+		audioSetSurround51(data->checkbox.value);
+		break;
+	}
+
+	return 0;
+}
+
+static char *menutextSurroundStatus(struct menuitem *item)
+{
+	static char text[96];
+
+	if (audioGetOutputChannels() == 6) {
+		snprintf(text, sizeof(text), "Output: 5.1 (device has %d channels)\n", audioGetDeviceChannels());
+	} else {
+		snprintf(text, sizeof(text), "Output: Stereo, Dolby Surround\n");
+	}
+
+	return text;
+}
+
+static MenuItemHandlerResult menuhandlerSurroundStatus(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	if (operation == MENUOP_CHECKHIDDEN) {
+		return !surroundSelected();
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerSurroundHint(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	if (operation == MENUOP_CHECKHIDDEN) {
+		return surroundSelected();
+	}
+
+	return 0;
+}
+
+static char *menutextSpeakerTest(struct menuitem *item)
+{
+	static char text[64];
+	const char *name = audioGetSpeakerTestName();
+
+	if (name) {
+		snprintf(text, sizeof(text), "Speaker Test: %s\n", name);
+	} else {
+		snprintf(text, sizeof(text), "Speaker Test\n");
+	}
+
+	return text;
+}
+
+static MenuItemHandlerResult menuhandlerSpeakerTest(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !surround51Usable();
+	case MENUOP_SET:
+		if (audioGetSpeakerTestName()) {
+			audioStopSpeakerTest();
+		} else {
+			audioStartSpeakerTest();
+		}
+		break;
+	}
+
+	return 0;
+}
+
+// MOD: speaker volumes - item->param is the speaker (see audioGetSpeakerVolume)
+static MenuItemHandlerResult menuhandlerSpeakerVolume(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		// Centre, subwoofer and rear only exist with 5.1 output
+		return !surround51Usable() || (item->param >= 2 && audioGetOutputChannels() != 6);
+	case MENUOP_GETSLIDER:
+		data->slider.value = audioGetSpeakerVolume(item->param);
+		break;
+	case MENUOP_SET:
+		audioSetSpeakerVolume(item->param, data->slider.value);
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		sprintf(data->slider.label, "%d%%", (s32)data->slider.value);
+		break;
+	}
+
+	return 0;
+}
+
+struct menuitem g_ExtendedAudioLevelsMenuItems[] = {
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Front Left", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SLIDER, 1, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Front Right", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SLIDER, 2, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Centre", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SLIDER, 3, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Subwoofer", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SLIDER, 4, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Rear Left", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SLIDER, 5, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Rear Right", 150, menuhandlerSpeakerVolume },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedAudioLevelsMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Levels",
+	g_ExtendedAudioLevelsMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+// (a handler rather than OPENSDIALOG, so it can be greyed out)
+static MenuItemHandlerResult menuhandlerAudioLevels(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !surround51Usable();
+	case MENUOP_SET:
+		menuPushDialog(&g_ExtendedAudioLevelsMenuDialog);
+		break;
+	}
+
+	return 0;
+}
+
 struct menuitem g_ExtendedAudioMenuItems[] = {
 	{
 		MENUITEMTYPE_CHECKBOX,
@@ -1262,6 +1479,54 @@ struct menuitem g_ExtendedAudioMenuItems[] = {
 		(uintptr_t)"Disable MP Death Music",
 		0,
 		menuhandlerDisableMpDeathMusic,
+	},
+	{
+		MENUITEMTYPE_SEPARATOR,
+		0,
+		0,
+		0,
+		0,
+		NULL,
+	},
+	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"5.1 Surround Output",
+		0,
+		menuhandlerSurround51,
+	},
+	{
+		MENUITEMTYPE_LABEL,
+		0,
+		0,
+		(uintptr_t)&menutextSurroundStatus,
+		0,
+		menuhandlerSurroundStatus,
+	},
+	{
+		MENUITEMTYPE_LABEL,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Set Sound to Surround in the Audio options\n",
+		0,
+		menuhandlerSurroundHint,
+	},
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Levels...\n",
+		0,
+		menuhandlerAudioLevels,
+	},
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		0,
+		(uintptr_t)&menutextSpeakerTest,
+		0,
+		menuhandlerSpeakerTest,
 	},
 	{
 		MENUITEMTYPE_SEPARATOR,
@@ -1290,6 +1555,21 @@ struct menudialogdef g_ExtendedAudioMenuDialog = {
 	MENUDIALOGFLAG_LITERAL_TEXT,
 	NULL,
 };
+
+// MOD: surround 5.1 - the "Surround Setup" shortcut in the game's Audio
+// Options (mainmenu.c), shown only while the Sound option is Surround
+MenuItemHandlerResult menuhandlerSurroundSetup(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKHIDDEN:
+		return !surroundSelected();
+	case MENUOP_SET:
+		menuPushDialog(&g_ExtendedAudioMenuDialog);
+		break;
+	}
+
+	return 0;
+}
 
 static MenuItemHandlerResult menuhandlerUseKeyReloads(s32 operation, struct menuitem *item, union handlerdata *data)
 {

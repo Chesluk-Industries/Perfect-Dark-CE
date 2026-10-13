@@ -3,6 +3,9 @@
 #include "game/chraicommands.h"
 #include "game/dlights.h"
 #include "game/propsnd.h"
+#ifndef PLATFORM_N64
+#include "system.h" // MOD: cutscene lift sound - sysLogPrintf
+#endif
 #include "game/atan2f.h"
 #include "game/hudmsg.h"
 #include "game/file.h"
@@ -41,7 +44,11 @@ u32 var8006ae4c = 0;
 s16 var8006ae50 = -1;
 u32 var8006ae54 = 999;
 
+#ifndef PLATFORM_N64
+#define CHANNELCOUNT()         160 // MOD: sound capacity (4 x 40)
+#else
 #define CHANNELCOUNT()         (IS4MB() ? 30 : 40)
+#endif
 #define CHANNEL_IS_AI(channel) (channel >= 0 && channel <= 7)
 #define CHANNEL_HEAP_FIRST     CHANNEL_8
 
@@ -667,7 +674,13 @@ s16 psCreate(struct pschannel *channel, struct prop *prop, s16 soundnum, s16 pad
 	spac.packed = soundnum;
 
 	if (channel == NULL) {
+#ifndef PLATFORM_N64
+		// MOD: sound capacity - new positional sounds were refused once 12
+		// were playing, the main reason sounds dropped out in busy fights
+		if (type != PSTYPE_FOOTSTEP && g_SndNumPlaying > 12 * 4) {
+#else
 		if (type != PSTYPE_FOOTSTEP && g_SndNumPlaying > 12) {
+#endif
 			return -1;
 		}
 
@@ -1025,6 +1038,37 @@ s32 psPlayFromProp(s32 channelnum, s16 soundnum, s32 vol, struct prop *prop, s16
 
 	return retchannelnum;
 }
+
+#ifndef PLATFORM_N64
+/**
+ * MOD: cutscene lift sound - stops the looping sounds attached to a prop
+ * (a lift's motor), leaving one-shot sounds (its stopping clunk) to finish.
+ * Returns how many were stopped.
+ */
+s32 psStopRepeatingForProp(struct prop *prop)
+{
+	s32 i;
+	s32 count = 0;
+
+	for (i = 0; i < CHANNELCOUNT(); i++) {
+		struct pschannel *channel = &g_PsChannels[i];
+
+		// (the lift's own sounds, PSTYPE_DOOR, are its business: only what
+		// the cutscene's script played on it)
+		if ((channel->flags & PSFLAG_FREE) == 0 && channel->prop == prop
+				&& (channel->flags & PSFLAG_REPEATING)
+				&& channel->type != PSTYPE_DOOR
+				&& (channel->flags2 & PSFLAG2_STOPPED) == 0) {
+			sysLogPrintf(LOG_NOTE, "LIFT: lift at rest in a cutscene: stopped its looping sound %x (channel %d)",
+					(u16) channel->soundnum26, i);
+			psStopChannel(i);
+			count++;
+		}
+	}
+
+	return count;
+}
+#endif
 
 void psMuteChannel(s32 channelnum)
 {

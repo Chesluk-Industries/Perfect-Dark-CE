@@ -274,7 +274,12 @@ struct smoke *smokeCreate(struct coord *pos, RoomNum *rooms, s16 type)
 			break;
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: co-op effects - smoke isn't cut short in co-op/counter-op
+		if (playercount >= 2 && g_Vars.normmplayerisrunning) {
+#else
 		if (playercount >= 2) {
+#endif
 			// Multiplayer - clear existing smoke if it's not any of the following
 			if ((g_Smokes + i)->type != SMOKETYPE_BULLETIMPACT
 					&& (g_Smokes + i)->type != SMOKETYPE_ROCKETTAIL
@@ -680,7 +685,26 @@ Gfx *smokeRender(struct prop *prop, Gfx *gdl, bool xlupass)
 
 		for (i = 0; i < ARRAYCOUNT(smoke->parts); i++) {
 			if (smoke->parts[i].size > 0) {
+#ifndef PLATFORM_N64
+				// MOD: smooth speed - smoke moves in 60th steps; drawn at
+				// faster framerates, each cloud is carried on by the part of
+				// the next step that has passed (the prop's time remainder)
+				struct smokepart part = smoke->parts[i];
+				f32 ahead = prop->propupdate60err * 0.25f;
+
+				part.pos.y += g_SmokeTypes[smoke->type].unk1c * ahead;
+				part.size += g_SmokeTypes[smoke->type].unk18 * ahead;
+				part.alpha -= g_SmokeTypes[smoke->type].fgrotatespeed * ahead;
+				part.rot += part.deltarot * ahead;
+				part.offset1 += 0.025f * ahead;
+				part.offset2 += 0.025f * ahead;
+
+				if (part.size > 0.0f && part.alpha > 0.0f) {
+					gdl = smokeRenderPart(smoke, &part, gdl, &sp8c, sp88);
+				}
+#else
 				gdl = smokeRenderPart(smoke, &smoke->parts[i], gdl, &sp8c, sp88);
+#endif
 			} else {
 				smoke->parts[i].size = 0;
 			}

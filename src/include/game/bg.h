@@ -64,6 +64,9 @@ Gfx *bgRenderRoomOpaque(Gfx *gdl, s32 roomnum);
 Gfx *bgRenderRoomXlu(Gfx *gdl, s32 roomnum);
 s32 bgPopulateVtxBatchType(s32 roomnum, struct vtxbatch *batches, Gfx *gdl, s32 batchindex, Vtx *vertices, s32 arg5);
 void bgFindRoomVtxBatches(s32 roomnum);
+#ifndef PLATFORM_N64
+void bgBuildShinyXluMask(s32 roomnum); // MOD: shiny alpha fix
+#endif
 bool bgTestLineIntersectsIntBbox(struct coord *arg0, struct coord *arg1, s32 *arg2, s32 *arg3);
 bool bgTestLineIntersectsBbox(struct coord *arg0, struct coord *arg1, struct coord *arg2, struct coord *arg3);
 bool bgTestHitOnObj(struct coord *arg0, struct coord *arg1, struct coord *arg2, Gfx *gdl, Gfx *gdl2, Vtx *vertices, struct hitthing *hitthing);
@@ -104,6 +107,8 @@ void bgCalculatePortalBbox(s32 portalnum, struct coord *bbmin, struct coord *bbm
 void bgFindEnteredRooms(struct coord *bbmin, struct coord *upper, RoomNum *rooms, s32 maxlen, bool arg4);
 #ifndef PLATFORM_N64
 void bgCalculateGlaresForVisibleRooms(void);
+// MOD: gun blocks glares - by joshuarwood (perfect_dark PR #714)
+bool bgTestHitOnWeapon(struct model *model, struct coord *origin, struct coord *end, struct coord *dir, Gfx *gdl, Gfx *gdl2, Vtx *vertices, struct coord *bounds, f32 *lowest_dist);
 #endif
 
 #endif

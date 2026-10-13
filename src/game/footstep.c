@@ -148,6 +148,29 @@ s32 footstepChooseSound(struct chrdata *chr, s32 footstepindex)
 	return g_FootstepSounds[index];
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: footsteps - the normal and the "magic" (AI asleep) checks shared
+ * chr->oldframe, and at high tick rates they took turns, each comparing its
+ * frame with the other's: a step on nearly every tick. The magic check keeps
+ * its own previous frame and stays quiet while the normal one is running for
+ * the chr, and steps are at most one per FOOTSTEP_MININTERVAL240 (a Skedar's
+ * run is one per 0.13 s).
+ */
+#define FOOTSTEP_MININTERVAL240 28 // 240ths: 0.117 s
+#define FOOTSTEP_AWAKE240 32       // 240ths: the normal check ran this recently
+
+static void footstepPlay(struct chrdata *chr, s32 soundnum)
+{
+	if ((u32) (g_Vars.lvframe240 - chr->lastfootstep240) < FOOTSTEP_MININTERVAL240) {
+		return;
+	}
+
+	chr->lastfootstep240 = g_Vars.lvframe240;
+	psCreate(NULL, chr->prop, soundnum, -1, -1, PSFLAG_0400, 0, PSTYPE_FOOTSTEP, NULL, -1, NULL, -1, -1, -1, -1);
+}
+#endif
+
 /**
  * Check if a footstep sound should play for the given chr and play it if so.
  *
@@ -167,10 +190,18 @@ void footstepCheckDefault(struct chrdata *chr)
 			s32 i;
 
 			chr->oldframe = frame;
+#ifndef PLATFORM_N64
+			chr->lastfootcheck240 = g_Vars.lvframe240; // MOD: footsteps
+#endif
 
 			for (i = 0; i < ARRAYCOUNT(g_FootstepAnims); i++) {
 				if (modelGetAnimNum(chr->model) == g_FootstepAnims[i].animnum) {
 					if (CHRRACE(chr) == RACE_SKEDAR && g_FootstepAnims[i].animnum == ANIM_SKEDAR_RUNNING) {
+#ifndef PLATFORM_N64
+						if (frame < prevframe || frame - prevframe > 8.0f) {
+							// no step (MOD: footsteps)
+						} else
+#endif
 						if ((frame >= 2 && prevframe < 2) || (frame >= 17 && prevframe < 17)) { \
 							chr->footstep = 1;
 						} else if ((frame >= 10 && prevframe < 10) || (frame >= 25 && prevframe < 25)) {
@@ -178,14 +209,11 @@ void footstepCheckDefault(struct chrdata *chr)
 						}
 					} else {
 #ifndef PLATFORM_N64
-						// fix spamming footsteps at >= 60fps
-						if (g_Vars.lvupdate240 < 4) {
-							const s32 roundedframe = (s32)(frame * (4.f / (f32)g_Vars.lvupdate240));
-							if (roundedframe == (g_FootstepAnims[i].frame1*2) && prevframe < g_FootstepAnims[i].frame1) {
-								chr->footstep = 1;
-							} else if (roundedframe == (g_FootstepAnims[i].frame2*2) && prevframe < g_FootstepAnims[i].frame2) {
-								chr->footstep = 2;
-							}
+						// MOD: footsteps - only a frame that moved forward from
+						// last tick's (the port's rounded-frame fix lost or
+						// doubled steps)
+						if (frame < prevframe || frame - prevframe > 8.0f) {
+							// no step
 						} else
 #endif
 						if (frame >= g_FootstepAnims[i].frame1 && prevframe < g_FootstepAnims[i].frame1) {
@@ -198,7 +226,9 @@ void footstepCheckDefault(struct chrdata *chr)
 					soundnum = footstepChooseSound(chr, i);
 
 					if (soundnum != -1 && chr->footstep != 0) {
-#if VERSION >= VERSION_NTSC_1_0
+#ifndef PLATFORM_N64
+						footstepPlay(chr, soundnum);
+#elif VERSION >= VERSION_NTSC_1_0
 						psCreate(NULL, chr->prop, soundnum, -1, -1, PSFLAG_0400, 0, PSTYPE_FOOTSTEP, NULL, -1, NULL, -1, -1, -1, -1);
 #else
 						psCreate(NULL, chr->prop, soundnum, -1, -1, 0, 0, PSTYPE_NONE, NULL, -1, NULL, -1, -1, -1, -1);
@@ -237,6 +267,14 @@ void footstepCheckMagic(struct chrdata *chr)
 	s32 soundnum;
 
 	if (debugIsFootstepsEnabled() && PLAYERCOUNT() == 1 && chr->magicanim >= 0) {
+#ifndef PLATFORM_N64
+		f32 magicprev = chr->magicframe; // MOD: footsteps
+
+		// MOD: footsteps - the normal check is running for this chr: it does the steps
+		if ((u32) (g_Vars.lvframe240 - chr->lastfootcheck240) < FOOTSTEP_AWAKE240) {
+			return;
+		}
+#endif
 #if VERSION >= VERSION_PAL_BETA
 		chr->magicframe += g_Vars.lvupdate60freal * chr->magicspeed;
 #else
@@ -255,10 +293,15 @@ void footstepCheckMagic(struct chrdata *chr)
 
 			frame = chr->magicframe;
 			index = chr->magicanim;
+#ifndef PLATFORM_N64
+			// MOD: footsteps - its own previous frame, not the animation's
+			prevframe = magicprev;
+#else
 			prevframe = chr->oldframe;
+			chr->oldframe = frame;
+#endif
 
 			chr->footstep = 0;
-			chr->oldframe = frame;
 
 			if (ydiff < 250 && xdiff * xdiff + zdiff * zdiff < 3000000) {
 				if (CHRRACE(chr) == RACE_SKEDAR && g_FootstepAnims[index].animnum == ANIM_SKEDAR_RUNNING) {
@@ -278,7 +321,9 @@ void footstepCheckMagic(struct chrdata *chr)
 				soundnum = footstepChooseSound(chr, index);
 
 				if (soundnum != -1 && chr->footstep != 0) {
-#if VERSION >= VERSION_NTSC_1_0
+#ifndef PLATFORM_N64
+					footstepPlay(chr, soundnum);
+#elif VERSION >= VERSION_NTSC_1_0
 					psCreate(NULL, chr->prop, soundnum, -1,
 							-1, PSFLAG_0400, 0, PSTYPE_FOOTSTEP, NULL, -1, NULL, -1, -1, -1, -1);
 #else

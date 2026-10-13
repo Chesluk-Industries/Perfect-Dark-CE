@@ -187,6 +187,11 @@ const char *fsGetModDir(void)
 	return modDir[0] ? modDir : NULL;
 }
 
+// MOD: light patches - by joshuarwood (perfect_dark PR #722)
+void fsSetModDir(const char *path) {
+	strncpy(modDir, path, FS_MAXPATH);
+}
+
 s32 fsFileLoadTo(const char *name, void *dst, u32 dstSize)
 {
 	const char *fullName = fsFullPath(name);

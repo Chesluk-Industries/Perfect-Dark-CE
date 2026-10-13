@@ -51,6 +51,17 @@ static bool current_depth_mask;
 
 static uint32_t frame_count;
 
+// MOD: decal edge clamp - on N64 a decal (ZMODE_DEC: bullet holes, blood,
+// scorch marks, signs drawn on walls) only shows where the surface under it
+// is at its depth, so the parts hanging past an edge vanish. Here: pass 1
+// marks the stencil where the surface isn't in front of the decal, pass 2
+// draws where it also isn't too far behind, pass 3 clears the marks.
+// Video.DecalClamp (port/src/video.c).
+extern "C" int32_t g_DecalClamp;
+static bool current_decal = false;
+bool gfx_decal_clamp_scope = false; // set by G_DECALCLAMP_EXT around wallhits (gfx_pc.cpp)
+static int default_stencil_bits = -1;
+
 static std::vector<Framebuffer> framebuffers;
 static size_t current_framebuffer;
 static float current_noise_scale;
@@ -741,6 +752,7 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
 }
 
 static void gfx_opengl_set_depth_mode(bool depth_test, bool depth_update, bool depth_compare, bool depth_source_prim, uint16_t zmode) {
+    current_decal = depth_test && depth_compare && zmode == ZMODE_DEC; // MOD: decal edge clamp
     if (depth_test) {
         glEnable(GL_DEPTH_TEST);
         glDepthMask(depth_update ? GL_TRUE : GL_FALSE);
@@ -810,9 +822,81 @@ static void gfx_opengl_set_use_alpha(bool use_alpha, bool modulate) {
     }
 }
 
+// MOD: decal edge clamp - whether the framebuffer drawn to has a stencil buffer
+static bool gfx_opengl_has_stencil(void) {
+    if (current_framebuffer != 0 && current_framebuffer < framebuffers.size()) {
+        return framebuffers[current_framebuffer].has_depth_buffer; // depth + stencil renderbuffer
+    }
+
+    if (default_stencil_bits < 0) {
+        GLint bits = 0;
+
+        while (glGetError() != GL_NO_ERROR) {}
+
+        glGetIntegerv(GL_STENCIL_BITS, &bits);
+
+        if (glGetError() != GL_NO_ERROR) {
+            bits = 0;
+            glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_STENCIL, GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &bits);
+            while (glGetError() != GL_NO_ERROR) {}
+        }
+
+        default_stencil_bits = bits;
+        sysLogPrintf(LOG_NOTE, "GL: screen stencil bits: %d (decal edge clamp %s)", bits, bits > 0 ? "on" : "off without a framebuffer");
+    }
+
+    return default_stencil_bits > 0;
+}
+
 static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     // printf("flushing %d tris\n", buf_vbo_num_tris);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+
+    // MOD: decal edge clamp
+    if (current_decal && g_DecalClamp && gfx_decal_clamp_scope && gfx_opengl_has_stencil()) {
+        GLboolean colormask[4];
+        GLsizei count = 3 * buf_vbo_num_tris;
+
+        glGetBooleanv(GL_COLOR_WRITEMASK, colormask);
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xff);
+
+        // 1: where the surface isn't in front of the (slightly raised) decal
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDepthMask(GL_FALSE);
+        glStencilFunc(GL_ALWAYS, 1, 0xff);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glDepthFunc(GL_LEQUAL);
+        glDrawArrays(GL_TRIANGLES, 0, count);
+
+        // 2: and isn't far behind it either (an edge with open space behind)
+        glColorMask(colormask[0], colormask[1], colormask[2], colormask[3]);
+        glDepthMask(current_depth_mask ? GL_TRUE : GL_FALSE);
+        glStencilFunc(GL_EQUAL, 1, 0xff);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glPolygonOffset(1.0f, 16384.0f);
+        glDepthFunc(GL_GEQUAL);
+        glDrawArrays(GL_TRIANGLES, 0, count);
+
+        // 3: clear the marks
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDepthMask(GL_FALSE);
+        glDepthFunc(GL_ALWAYS);
+        glStencilFunc(GL_ALWAYS, 0, 0xff);
+        glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+        glDrawArrays(GL_TRIANGLES, 0, count);
+
+        // As set_depth_mode left it for decals
+        glColorMask(colormask[0], colormask[1], colormask[2], colormask[3]);
+        glDepthMask(current_depth_mask ? GL_TRUE : GL_FALSE);
+        glDepthFunc(GL_LEQUAL);
+        glPolygonOffset(-2, -2);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glStencilFunc(GL_ALWAYS, 0, 0xff);
+        glDisable(GL_STENCIL_TEST);
+        return;
+    }
+
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
 
@@ -1165,6 +1249,10 @@ void gfx_opengl_clear_framebuffer(bool clear_color, bool clear_depth) {
     if (clear_depth) {
         glDepthMask(GL_TRUE);
         mask |= GL_DEPTH_BUFFER_BIT;
+        // MOD: decal edge clamp - stencil starts at 0
+        glStencilMask(0xff);
+        glClearStencil(0);
+        mask |= GL_STENCIL_BUFFER_BIT;
     }
     glClear(mask);
     if (clear_depth) {

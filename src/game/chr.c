@@ -49,6 +49,7 @@
 #include "types.h"
 #ifndef PLATFORM_N64
 #include "video.h"
+#include "game/lv.h" // MOD: high framerates - LV_STEPS240
 #endif
 
 void rng2SetSeed(u32 seed);
@@ -684,8 +685,17 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 			arg2->x += chr->pushspeed[0] * VAR(lvupdate60freal);
 			arg2->z += chr->pushspeed[1] * VAR(lvupdate60freal);
 
+#ifndef PLATFORM_N64
+			// MOD: push decay - 10% per 60th, not per tick (at 240 FPS a
+			// pushed chr went a quarter as far)
+			f32 pushkeep = __builtin_powf(0.9f, VAR(lvupdate60freal));
+
+			chr->pushspeed[0] *= pushkeep;
+			chr->pushspeed[1] *= pushkeep;
+#else
 			chr->pushspeed[0] *= 0.9f;
 			chr->pushspeed[1] *= 0.9f;
+#endif
 
 			if (chr->pushspeed[0] != 0.0f || chr->pushspeed[1] != 0.0f) {
 				f32 pushdist = sqrtf(chr->pushspeed[0] * chr->pushspeed[0] + chr->pushspeed[1] * chr->pushspeed[1]);
@@ -721,10 +731,20 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 		} else if (chr->actiontype == ACT_SKJUMP
 				&& chr->act_skjump.state == SKJUMPSTATE_AIRBORNE
 				&& !chr->act_skjump.needsnewanim
+#ifndef PLATFORM_N64
+				&& g_Vars.lvupdate240 != 0) { // MOD: smooth skjump
+			struct coord skjumppos;
+
+			chrSkJumpGetPos(chr, &skjumppos); // MOD: smooth skjump
+			arg2->x = skjumppos.x;
+			yincrement = skjumppos.y;
+			arg2->z = skjumppos.z;
+#else
 				&& g_Vars.lvupdate60 != 0) {
 			arg2->x = chr->act_skjump.pos.x;
 			yincrement = chr->act_skjump.pos.y;
 			arg2->z = chr->act_skjump.pos.z;
+#endif
 		} else if (chr->onladder) {
 			f32 dist;
 			f32 xdiff = arg2->x - arg1->x;
@@ -766,7 +786,11 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 		if (chr->actiontype == ACT_SKJUMP
 				&& chr->act_skjump.state == SKJUMPSTATE_AIRBORNE
 				&& !chr->act_skjump.needsnewanim
+#ifndef PLATFORM_N64
+				&& g_Vars.lvupdate240 != 0) { // MOD: smooth skjump
+#else
 				&& g_Vars.lvupdate60 != 0) {
+#endif
 #if VERSION >= VERSION_NTSC_1_0
 			if (chr0f01f264(chr, arg2, spfc, yincrement, true)) {
 				chr->manground += yincrement;
@@ -938,6 +962,18 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 							}
 						}
 					} else if (chr->manground <= chr->ground) {
+#ifndef PLATFORM_N64
+						// MOD: high framerates - smoothing by fractional 60ths
+						// (whole ones only made a chr's height judder on stairs)
+						if (g_Vars.lvupdate60f != (f32)g_Vars.lvupdate60) {
+							f32 k = PAL ? 0.88120001554489f : 0.9f;
+							f32 kt = __builtin_powf(k, g_Vars.lvupdate60f);
+
+							chr->sumground = chr->sumground * kt + chr->ground * (1.0f - kt) / (1.0f - k);
+							chr->fallspeed.x *= kt;
+							chr->fallspeed.z *= kt;
+						} else
+#endif
 						for (i = 0; i < g_Vars.lvupdate60; i++) {
 							chr->sumground = chr->sumground * (PAL ? 0.88120001554489f : 0.9f) + chr->ground;
 							chr->fallspeed.x *= (PAL ? 0.88120001554489f : 0.9f);
@@ -2071,6 +2107,33 @@ void chrUncloakTemporarily(struct chrdata *chr)
 	chr->cloakpause = TICKS(120);
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: cloak fade - (lvupdate240 * 5) / 8 a tick is 0 at 240 FPS (a chr that
+ * uncloaked in view stayed cloaked): the remainder is carried over, the same
+ * for every chr in a tick.
+ */
+static s32 chrCloakFadeStep(void)
+{
+	static s32 frame = -1;
+	static s32 step = 0;
+	static s32 rem = 0;
+
+	if (g_Vars.lvframe240 != frame) {
+		s32 total = g_Vars.lvupdate240 * 5 + rem;
+
+		frame = g_Vars.lvframe240;
+		step = total / 8;
+		rem = total % 8;
+	}
+
+	return g_Vars.lvupdate240 > 0 ? step : 0;
+}
+#define CLOAKFADESTEP() chrCloakFadeStep()
+#else
+#define CLOAKFADESTEP() ((g_Vars.lvupdate240 * 5) / 8)
+#endif
+
 void chrUpdateCloak(struct chrdata *chr)
 {
 	s32 qty;
@@ -2195,7 +2258,7 @@ void chrUpdateCloak(struct chrdata *chr)
 	// Update cloakfade
 	if (chr->hidden & CHRHFLAG_CLOAKED) {
 		if (chr->cloakfadefinished == false) {
-			fadefrac = chr->cloakfadefrac + (g_Vars.lvupdate240 * 5) / 8;
+			fadefrac = chr->cloakfadefrac + CLOAKFADESTEP();
 
 			if (fadefrac >= 128) {
 				chr->cloakfadefinished = true;
@@ -2216,7 +2279,7 @@ void chrUpdateCloak(struct chrdata *chr)
 		}
 
 		if (chr->cloakfadefrac > 0) {
-			fadefrac = chr->cloakfadefrac - (g_Vars.lvupdate240 * 5) / 8;
+			fadefrac = chr->cloakfadefrac - CLOAKFADESTEP();
 
 			if (fadefrac < 0) {
 				fadefrac = 0;
@@ -2517,6 +2580,15 @@ s32 chrTick(struct prop *prop)
 		if ((chr->actiontype == ACT_PATROL && chr->act_patrol.waydata.mode == WAYMODE_MAGIC)
 				|| (chr->actiontype == ACT_GOPOS && chr->act_gopos.waydata.mode == WAYMODE_MAGIC)) {
 			needsupdate = func0f08e8ac(prop, &prop->pos, modelGetEffectiveScale(model), true);
+
+#ifndef PLATFORM_N64
+			// MOD: high framerates - off screen the animation isn't ticked, and
+			// above 60 FPS a blend could be left a fraction short when a patrol
+			// resumed: chrTickPatrol waited for it and the guard stood still
+			if (fulltick && model->anim && modelIsAnimMerging(model)) {
+				chr0f0220ec(chr, lvupdate240, false);
+			}
+#endif
 
 			if (needsupdate) {
 				model->anim->average = false;
@@ -6493,6 +6565,19 @@ Gfx *chrRenderCloak(Gfx *gdl, struct prop *chrprop, struct prop *thisprop)
 
 Gfx *chrRenderShield(Gfx *gdl, struct chrdata *chr, u32 alpha)
 {
+#ifndef PLATFORM_N64
+	// MOD: shield shimmer - steps once per 60th, not per frame
+	s32 cmsteps = LV_STEPS240(4);
+
+	if (chrGetShield(chr) > 0 && cmsteps > 0) {
+		chr->cmcount += cmsteps;
+
+		if (chr->cmcount > 300) {
+			chr->cmcount = 0;
+		}
+	}
+#define CMSTEP_ACTIVE (cmsteps > 0)
+#else
 	if (chrGetShield(chr) > 0 && g_Vars.lvupdate240 > 0) {
 		chr->cmcount++;
 
@@ -6500,11 +6585,13 @@ Gfx *chrRenderShield(Gfx *gdl, struct chrdata *chr, u32 alpha)
 			chr->cmcount = 0;
 		}
 	}
+#define CMSTEP_ACTIVE (g_Vars.lvupdate240 > 0)
+#endif
 
 	if ((chr->hidden2 & CHRH2FLAG_SHIELDHIT)
 			|| (chrGetShield(chr) > 0 && chr->cmcount < 10)
 			|| (chr->cloakfadefrac > 0 && !chr->cloakfadefinished)) {
-		if (chrGetShield(chr) > 0 && g_Vars.lvupdate240 > 0) {
+		if (chrGetShield(chr) > 0 && CMSTEP_ACTIVE) {
 			s32 numiterations = (rngRandom() % 4) + 1;
 			s32 newcmnum = chr->cmnum2;
 			s32 candidate;

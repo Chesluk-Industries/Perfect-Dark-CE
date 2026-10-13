@@ -17,6 +17,9 @@
 #include "lib/mtx.h"
 #include "data.h"
 #include "types.h"
+#ifndef PLATFORM_N64
+#include "game/lv.h" // MOD: wallhit timers - LV_STEPS240
+#endif
 
 #define WALLHITTYPE_SOFT   0
 #define WALLHITTYPE_BULLET 1
@@ -431,7 +434,15 @@ void wallhitsTick(void)
 
 	static s32 var8007f834 = 0;
 
+#ifndef PLATFORM_N64
+	// MOD: wallhit timers - the grow/fade step was rounded per tick (too fast,
+	// or not at all, above 60 FPS): the 60 FPS step once per 60th
+	s32 wallsteps = LV_STEPS240(4);
+
+	sp12c = (4 + 2.0f) * 0.25f;
+#else
 	sp12c = (g_Vars.lvupdate240 + 2.0f) * 0.25f;
+#endif
 	fov = currentPlayerGetGunZoomFov();
 
 	mainOverrideVariable("wallhit", &var8007f750);
@@ -452,9 +463,15 @@ void wallhitsTick(void)
 	if (numallocated < g_WallhitsCriticalSpareLimit) {
 		wallhitRemoveOne();
 	} else if (numallocated < g_WallhitsGoalSpareLimit) {
+#ifndef PLATFORM_N64
+		var8007f834 += wallsteps; // MOD: wallhit timers (per 60th)
+
+		if (var8007f834 >= 8) {
+#else
 		var8007f834++;
 
 		if (var8007f834 == 8) {
+#endif
 			var8007f834 = 0;
 			wallhitRemoveOne();
 		}
@@ -474,7 +491,11 @@ void wallhitsTick(void)
 		}
 
 		if (wallhit->timermax) {
+#ifndef PLATFORM_N64
+			u32 amount = (u32)(f0 + 0.5f) * wallsteps;
+#else
 			u32 amount = (u32)(f0 + 0.5f);
+#endif
 
 			if (wallhit->expanding) {
 				if (wallhit->timercur > wallhit->timermax) {
@@ -1317,7 +1338,19 @@ Gfx *wallhitRenderXluBgHits(s32 roomnum, Gfx *gdl)
 	return gdl;
 }
 
+static Gfx *wallhitRenderPropHitsInner(Gfx *gdl, struct prop *prop, bool xlu);
+
+// MOD: decal edge clamp - wallhits on props are clamped too
 Gfx *wallhitRenderPropHits(Gfx *gdl, struct prop *prop, bool xlu)
+{
+	gSPDecalClampEXT(gdl++, true);
+	gdl = wallhitRenderPropHitsInner(gdl, prop, xlu);
+	gSPDecalClampEXT(gdl++, false);
+
+	return gdl;
+}
+
+static Gfx *wallhitRenderPropHitsInner(Gfx *gdl, struct prop *prop, bool xlu)
 {
 	Col *colours;
 	struct defaultobj *obj = prop->obj;
@@ -1410,6 +1443,8 @@ Gfx *wallhitRenderPropHits(Gfx *gdl, struct prop *prop, bool xlu)
 
 Gfx *wallhitRenderBgHits(s32 roomnum, Gfx *gdl)
 {
+	gSPDecalClampEXT(gdl++, true); // MOD: decal edge clamp
+
 	if (g_Rooms[roomnum].opawallhits != NULL) {
 		gdl = wallhitRenderOpaBgHits(roomnum, gdl);
 	}
@@ -1417,6 +1452,8 @@ Gfx *wallhitRenderBgHits(s32 roomnum, Gfx *gdl)
 	if (g_Rooms[roomnum].xluwallhits != NULL) {
 		gdl = wallhitRenderXluBgHits(roomnum, gdl);
 	}
+
+	gSPDecalClampEXT(gdl++, false); // MOD: decal edge clamp
 
 	return gdl;
 }

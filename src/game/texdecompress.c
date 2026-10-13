@@ -2143,6 +2143,65 @@ struct tex *texFindInPool(s32 texturenum, struct texpool *pool)
 	return NULL;
 }
 
+/**
+ * MOD: texture quirks - level rock textures drawn in a translucent pass that
+ * must look solid: Air Base's 0x0aa2 showed the rocks behind it, Area 51's
+ * 0x00fa the railing shadows behind it. Called by the renderer (fast3d)
+ * with a loaded texture's address.
+ */
+static s32 texIsListedOpaque(s32 texturenum)
+{
+	return texturenum == 0x0aa2 || texturenum == 0x00fa;
+}
+
+s32 texIsForcedOpaque(const void *addr)
+{
+	// Looked up once per frame per address (the renderer asks per triangle)
+	static const void *cacheaddr[16];
+	static s8 cacheresult[16];
+	static s32 cachenum = 0;
+	static s32 cacheframe = -1;
+	struct tex *cur;
+	s32 result = false;
+	s32 i;
+
+	if (addr == NULL) {
+		return false;
+	}
+
+	if (cacheframe != g_Vars.lvframe60) {
+		cacheframe = g_Vars.lvframe60;
+		cachenum = 0;
+	}
+
+	for (i = 0; i < cachenum; i++) {
+		if (cacheaddr[i] == addr) {
+			return cacheresult[i];
+		}
+	}
+
+	for (cur = g_TexSharedPool.head; cur != NULL; ) {
+		if ((const void *) cur->data == addr) {
+			result = texIsListedOpaque(cur->texturenum);
+			break;
+		}
+
+		if (!cur->next) {
+			break;
+		}
+
+		cur = (struct tex *) PHYS_TO_K0(cur->next);
+	}
+
+	if (cachenum < 16) {
+		cacheaddr[cachenum] = addr;
+		cacheresult[cachenum] = result;
+		cachenum++;
+	}
+
+	return result;
+}
+
 s32 texGetPoolFreeBytes(struct texpool *pool)
 {
 	return (uintptr_t) pool->rightpos - (uintptr_t) pool->leftpos;

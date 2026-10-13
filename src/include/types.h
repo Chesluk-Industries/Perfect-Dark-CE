@@ -1345,6 +1345,11 @@ struct chrdata {
 	/*0x362*/ u8 drcarollimage_left : 4;
 	/*0x362*/ u8 drcarollimage_right : 4;
 	/*0x364*/ struct prop *lift;
+#ifndef PLATFORM_N64
+	s32 lastfootstep240; // MOD: footsteps - g_Vars.lvframe240 of its last footstep (footstepPlay)
+	s32 lastfootcheck240; // MOD: footsteps - g_Vars.lvframe240 of its last normal footstep check
+	s32 lastawake60; // MOD: high framerates - g_Vars.lvframe60 of its last tick that completed a 60th awake (chraTick)
+#endif
 };
 
 // This appears to be misnamed. Not only is it projectiles such as grenades and
@@ -2247,7 +2252,7 @@ struct hand {
 	/*0x0cb4*/ s32 gs_int4;
 	/*0x0cb8*/ s32 animload;
 	/*0x0cbc*/ s32 animframeinc;
-#if VERSION >= VERSION_PAL_BETA
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64) // MOD: smooth gun
 	/*0x0cc0*/ f32 animframeincfreal;
 #else
 	/*0x0cc0*/ u32 animframeincfreal;
@@ -3677,6 +3682,9 @@ struct room {
 
 #ifndef PLATFORM_N64
 	/*0x8c*/ u16 extra_flags;
+	// MOD: shiny alpha fix - port of the "/shinyalpha" fix by murkantor (perfect_dark_netplay, docs/PORT_SHINY_ALPHA.md)
+	// One bit per colour index: set if translucent (xlu layer) geometry uses it
+	u32 *shinyxlumask;
 #endif
 };
 
@@ -3960,11 +3968,22 @@ struct menu {
 	/*0x464*/ struct menulayer layers[6];
 	/*0x4f4*/ s16 depth; // index into layers. 1-indexed?
 	/*0x4f8*/ struct menudialog *curdialog;
+#ifdef PLATFORM_N64
 	/*0x4fc*/ struct menurow rows[VERSION >= VERSION_NTSC_1_0 ? 88 : 80];
+#else
+	struct menurow rows[256]; // MOD: menu capacity - room for the long PC options dialogs
+#endif
 	/*0x65c*/ s32 rowend;
 	/*0x660*/ struct menucolumn cols[VERSION >= VERSION_NTSC_1_0 ? 12 : 10];
 	/*0x6d8*/ s32 colend;
+#ifdef PLATFORM_N64
 	/*0x6dc*/ u32 blocks[80]; // for menuitemdata
+#else
+	// MOD: menu capacity - the Key Bindings dialog alone needs 96 words (24 dropdowns x 4).
+	// With 80 the item data of a stacked dialog overflowed into menumodel and nulled
+	// its buffer, so the next mission briefing load crashed (memcpy to NULL).
+	u32 blocks[512]; // for menuitemdata
+#endif
 	/*0x81c*/ s32 blockend;
 	/*0x820*/ u8 unk820;
 	/*0x824*/ s32 xrepeattimer60;

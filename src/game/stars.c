@@ -113,7 +113,12 @@ void starsReset(void)
 
 	g_StarPositions = NULL;
 
+#ifndef PLATFORM_N64
+	// MOD: co-op effects - stars in co-op/counter-op too
+	if (PLAYERCOUNT() < 2 || !g_Vars.normmplayerisrunning) {
+#else
 	if (PLAYERCOUNT() < 2) {
+#endif
 		g_StarsBelowHorizon = false;
 		g_StarGridSize = 3;
 

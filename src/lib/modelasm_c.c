@@ -910,6 +910,16 @@ static bool modelasmIterateThings1(void)
  * t6 = pointer to anim frame bytes
  * f0 containing an integer
  */
+#ifndef PLATFORM_N64
+// MOD: roll fix - distance between two u16 angles, going the short way round
+static s32 modelasmAngleDist(s32 a, s32 b)
+{
+	s32 d = (b - a) & 0xffff;
+
+	return d > 0x8000 ? 0x10000 - d : d;
+}
+#endif
+
 static bool modelasmIterateThings2(void)
 {
 	s32 t7;
@@ -1001,6 +1011,25 @@ static bool modelasmIterateThings2(void)
 
 		s3 = f0int;
 		v1 = 0x10000;
+
+#ifndef PLATFORM_N64
+		// MOD: roll fix - same as modelTweenRot in model.c: if the equivalent
+		// Euler triple (x + pi, pi - y, z + pi) is closer to the current
+		// rotation, tween towards it instead so flipped frames don't spin
+		{
+			s32 ax = (s0 + 0x8000) & 0xffff;
+			s32 ay = (0x8000 - s1) & 0xffff;
+			s32 az = (s2 + 0x8000) & 0xffff;
+			s32 dorig = modelasmAngleDist(t0slot->unk02, s0) + modelasmAngleDist(t0slot->unk04, s1) + modelasmAngleDist(t0slot->unk06, s2);
+			s32 dalt = modelasmAngleDist(t0slot->unk02, ax) + modelasmAngleDist(t0slot->unk04, ay) + modelasmAngleDist(t0slot->unk06, az);
+
+			if (dalt < dorig) {
+				s0 = ax;
+				s1 = ay;
+				s2 = az;
+			}
+		}
+#endif
 
 		// 02
 		s4 = t0slot->unk02;

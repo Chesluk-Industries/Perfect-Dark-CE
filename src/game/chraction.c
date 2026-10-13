@@ -3538,9 +3538,12 @@ void chrReactToDamage(struct chrdata *chr, struct coord *vector, f32 angle, s32 
 	bool knockedout = false;
 	s32 animnum = modelGetAnimNum(chr->model);
 
-#if VERSION >= VERSION_NTSC_1_0
+#if VERSION >= VERSION_NTSC_1_0 && defined(PLATFORM_N64)
 	if (chr->actiontype == ACT_DRUGGEDKO)
 #else
+	// MOD: knockout fix - a guard hit while he's still going down (or hit as
+	// he's knocked out) stays knocked out; NTSC 1.0+ only checked
+	// ACT_DRUGGEDKO, so a hit during the fall made him flinch and get up
 	if (chr->actiontype == ACT_DRUGGEDCOMINGUP
 			|| chr->actiontype == ACT_DRUGGEDDROP
 			|| chr->actiontype == ACT_DRUGGEDKO)
@@ -8148,7 +8151,13 @@ void chrTickAnim(struct chrdata *chr)
 	if (CHRRACE(chr) == RACE_HUMAN
 			&& modelGetAnimNum(chr->model) == ANIM_SNEEZE
 			&& modelGetCurAnimFrame(chr->model) >= 42
+#ifndef PLATFORM_N64
+			// MOD: sneeze sound - restarted every other frame (120 times a
+			// second at 240 FPS); now every 30th of a second, as at 60 FPS
+			&& LV_STEP240(8)
+#else
 			&& (g_Vars.lvframenum % 2) == 0
+#endif
 			&& chrGetDistanceToCurrentPlayer(chr) < 800) {
 		psCreate(NULL, chr->prop, SFX_0037, -1,
 				-1, 0, 0, PSTYPE_NONE, 0, -1, 0, -1, -1, -1, -1);
@@ -10513,6 +10522,32 @@ void chrTickShoot(struct chrdata *chr, s32 handnum)
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: drone laser - the Chicago drone's guns fired and turned per tick: at
+ * 240 FPS eight times as fast as on the N64, the beam restarting before it
+ * got far. They now step 30 times a second (the N64's frames), each shot
+ * counting a step's time towards its chance to hit, and the firing flags are
+ * used up by the shot: one shot per step.
+ */
+#define ROBOTATTACK_STEP240 8
+
+static bool robotAttackStep(void)
+{
+	static s32 frame = -1;
+	static s32 laststep = -1;
+	static bool result = false;
+
+	if (g_Vars.lvframe240 != frame) {
+		frame = g_Vars.lvframe240;
+		result = g_Vars.lvupdate240 > 0 && g_Vars.lvframe240 / ROBOTATTACK_STEP240 != laststep;
+		laststep = g_Vars.lvframe240 / ROBOTATTACK_STEP240;
+	}
+
+	return result;
+}
+#endif
+
 void func0f041a74(struct chrdata *chr)
 {
 #if VERSION >= VERSION_NTSC_1_0
@@ -10522,12 +10557,22 @@ void func0f041a74(struct chrdata *chr)
 #endif
 
 	if (chr->actiontype == ACT_ROBOTATTACK) {
+#ifndef PLATFORM_N64
+		// MOD: drone laser - each shot is a step's worth of time
+		f32 realupdate = g_Vars.lvupdate60freal;
+
+		g_Vars.lvupdate60freal = PALUPF(ROBOTATTACK_STEP240 / 4.0f);
+#endif
+
 		if (chr->act_robotattack.firing[0]) {
 			chr->prop->forcetick = true;
 			projectileCreate(chr->prop, chr->unk348[0], &chr->act_robotattack.pos[0],
 					&chr->act_robotattack.dir[0], chr->act_robotattack.guntype[0], chrGetTargetProp(chr));
 			chr->unk348[1]->unk08 = g_Vars.lvframe60 + 2;
 			chr->unk348[1]->unk14 = chr->unk348[0]->unk14;
+#ifndef PLATFORM_N64
+			chr->act_robotattack.firing[0] = false; // MOD: drone laser - one shot per step
+#endif
 		} else {
 			chr->prop->forcetick = false;
 		}
@@ -10537,14 +10582,29 @@ void func0f041a74(struct chrdata *chr)
 			projectileCreate(chr->prop, chr->unk348[1], &chr->act_robotattack.pos[1],
 					&chr->act_robotattack.dir[1], chr->act_robotattack.guntype[1], chrGetTargetProp(chr));
 			chr->unk348[0]->unk14 = chr->unk348[1]->unk14;
+#ifndef PLATFORM_N64
+			chr->act_robotattack.firing[1] = false; // MOD: drone laser - one shot per step
+#endif
 		} else {
 			chr->prop->forcetick = false;
 		}
+
+#ifndef PLATFORM_N64
+		g_Vars.lvupdate60freal = realupdate;
+
+		// (shots are used up, so stay ticked between them while attacking)
+		chr->prop->forcetick = !chr->act_robotattack.finished;
+#endif
 
 		beamTick(chr->unk348[0]->beam);
 		beamTick(chr->unk348[1]->beam);
 	} else if (chr->actiontype == ACT_ATTACKAMOUNT) {
 		if (chr->act_attack.numshots < chr->act_attack.maxshots
+#ifndef PLATFORM_N64
+				// MOD: high framerates - a semi-automatic fires on every call:
+				// one chance per 60th, or a burst fired 4x the bullets at 240
+				&& g_Vars.lvupdate60 > 0
+#endif
 				&& (chr->hidden & CHRHFLAG_FIRINGRIGHT)) {
 			chrTickShoot(chr, HAND_RIGHT);
 		}
@@ -10803,7 +10863,14 @@ void chrTickAttackAmount(struct chrdata *chr)
 	}
 
 	if (chr->act_attack.dooneburst) {
+#ifndef PLATFORM_N64
+		// MOD: attack amount - the burst's length counts 60ths, not ticks (the
+		// gun fires by time: at 240 FPS a burst fired a quarter of its bullets)
+		if (chr->act_attack.numshots < chr->act_attack.maxshots) {
+			chr->act_attack.numshots += g_Vars.lvupdate60;
+#else
 		if (chr->act_attack.numshots++ < chr->act_attack.maxshots) {
+#endif
 			chrSetHandFiring(chr, HAND_RIGHT, true);
 		} else {
 			chrAttackAmountUpdateAnimation(chr);
@@ -10923,6 +10990,10 @@ void chrTickRobotAttack(struct chrdata *chr)
 		return;
 	}
 
+#ifndef PLATFORM_N64
+	bool step = robotAttackStep(); // MOD: drone laser
+#endif
+
 	for (i = 0; i < 2; i++) {
 		empty = false;
 
@@ -10933,6 +11004,12 @@ void chrTickRobotAttack(struct chrdata *chr)
 			chr->unk348[i]->unk01 = 0;
 			firing = false;
 		}
+
+#ifndef PLATFORM_N64
+		if (!step) {
+			firing = false; // (between steps: the guns hold)
+		}
+#endif
 
 		act->firing[i] = firing;
 
@@ -11010,8 +11087,13 @@ void chrTickRobotAttack(struct chrdata *chr)
 			}
 		}
 
-		chr->gunroty[i] += (roty - chr->gunroty[i]) * 0.15f;
-		chr->gunrotx[i] += (rotx - chr->gunrotx[i]) * 0.15f;
+#ifndef PLATFORM_N64
+		if (step)
+#endif
+		{
+			chr->gunroty[i] += (roty - chr->gunroty[i]) * 0.15f;
+			chr->gunrotx[i] += (rotx - chr->gunrotx[i]) * 0.15f;
+		}
 
 		if (!empty) {
 			if (firing) {
@@ -11041,7 +11123,12 @@ void chrTickRobotAttack(struct chrdata *chr)
 				act->numshots[i]--;
 			}
 
-			chr->unk348[i]->unk00++;
+#ifndef PLATFORM_N64
+			if (step)
+#endif
+			{
+				chr->unk348[i]->unk00++;
+			}
 		}
 	}
 }
@@ -11489,7 +11576,12 @@ bool func0f043f2c(struct chrdata *chr, struct coord *runpos, u32 arg2, f32 *turn
 		maxspeed *= model->anim->playspeed;
 		accel *= model->anim->playspeed;
 
+#ifndef PLATFORM_N64
+		// MOD: smooth speed - chr AI turning keeps whole 60th steps
+		applyRotation60(&finalangle, angle1, turnspeed, accel, accel + accel, maxspeed);
+#else
 		applyRotation(&finalangle, angle1, turnspeed, accel, accel + accel, maxspeed);
+#endif
 
 		if (ABS(finalangle - angle1) < 0.01f) {
 			*turnspeed = 0;
@@ -13191,9 +13283,50 @@ bool chrStartSkJump(struct chrdata *chr, u8 arg1, u8 arg2, s32 arg3, u8 arg4)
 	return true;
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: smooth skjump - a Skedar's leap only moved on ticks with a whole 60th,
+ * so above 60 FPS it moved on one frame and held for the next ones. The
+ * action now runs (and turns) every tick, and the chr's movement takes the
+ * leap's position every tick from here: by the tick's time, the arc's height
+ * including the part of a 60th the timer hasn't counted yet.
+ */
+void chrSkJumpGetPos(struct chrdata *chr, struct coord *pos)
+{
+	f32 frac;
+	f32 y;
+
+	pos->x = chr->act_skjump.vel[0] * g_Vars.lvupdate60f + chr->prop->pos.x;
+	pos->z = chr->act_skjump.vel[1] * g_Vars.lvupdate60f + chr->prop->pos.z;
+
+	if (chr->act_skjump.total60 > 0) {
+		frac = 1.0f - (chr->act_skjump.timer60 - chr->prop->propupdate60err * 0.25f) / (f32)chr->act_skjump.total60;
+
+		if (frac > 1.0f) {
+			frac = 1.0f;
+		}
+
+		y = sinf(M_PI * frac) * 160.0f + chr->act_skjump.ground;
+	} else {
+		frac = 1.0f;
+		y = chr->act_skjump.ground;
+	}
+
+	pos->y = y - chr->prop->pos.y;
+
+	if (frac < 0.5f && pos->y < 0.0f) {
+		pos->y = 0.0f;
+	}
+}
+#endif
+
 void chrTickSkJump(struct chrdata *chr)
 {
+#ifndef PLATFORM_N64
+	if (g_Vars.lvupdate240 == 0) {
+#else
 	if (g_Vars.lvupdate60 == 0) {
+#endif
 		return;
 	}
 
@@ -13231,7 +13364,11 @@ void chrTickSkJump(struct chrdata *chr)
 		switch (chr->act_skjump.state) {
 		case SKJUMPSTATE_TAKEOFF:
 			fVar6 = chrGetInverseTheta(chr);
+#ifndef PLATFORM_N64
+			fVar5 = modelTweenRotAxis(fVar6, chr->act_skjump.roty, 1.0f - __builtin_powf(0.65f, g_Vars.lvupdate60f));
+#else
 			fVar5 = modelTweenRotAxis(fVar6, chr->act_skjump.roty, 0.35);
+#endif
 			chrSetLookAngle(chr, fVar5);
 			frame = modelGetCurAnimFrame(chr->model);
 
@@ -13282,6 +13419,10 @@ void chraTick(struct chrdata *chr)
 		return;
 	}
 
+#ifndef PLATFORM_N64
+	s32 firsttick = chr->actiontype == ACT_INIT; // MOD: high framerates (see aitick)
+#endif
+
 	if (chr->actiontype == ACT_INIT) {
 		chr->chrflags |= CHRCFLAG_FORCETOGROUND;
 		func0f02e9a0(chr, 0);
@@ -13305,19 +13446,56 @@ void chraTick(struct chrdata *chr)
 		chr->timer60 += g_Vars.lvupdate60;
 	}
 
+#ifndef PLATFORM_N64
+	s32 retry = chr->sleep < 0; // a command asked to be run again on the next tick
+#endif
+
 	chr->sleep -= g_Vars.lvupdate60;
 
+#ifndef PLATFORM_N64
+	// MOD: high framerates - an unalerted chr with sleep 0 only woke on frames
+	// completing a 60th, then moved by just that frame's time: patrols and
+	// turns went at a quarter speed at 240 FPS. It is now awake every frame,
+	// if it was awake on the last 60th: one whose sleep just ran out waits for
+	// its AI list first, or an action could put it back to sleep for good
+	// (Cassandra's walk in Extraction).
+	if ((chr->sleep < 0 || (chr->sleep == 0 && g_Vars.lvupdate60 == 0
+					&& (chr->lastawake60 == g_Vars.lvframe60 || firsttick)))
+#else
 	if (chr->sleep < 0
+#endif
 			|| (chr->chrflags & CHRCFLAG_NEVERSLEEP)
 			|| chr->alertness >= 65
 			|| (chr->aibot && (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD))) {
 		u8 pass = race == RACE_HUMAN || race == RACE_SKEDAR;
+#ifndef PLATFORM_N64
+		// MOD: high framerates - the AI list and the checks feeding it ran every
+		// frame, so its random rolls and yield-counted waits came 4x as often
+		// at 240 FPS. They run once per 60th, except:
+		// - a command being retried (camera_movement waiting for the outro
+		//   body, which needs the gun's memory: retried once per 60th it never
+		//   got it, and outros never started)
+		// - a new chr's first tick (its init list sets its team: WAR!'s Maians
+		//   fought each other on their placeholder team)
+		bool aitick = g_Vars.lvupdate60 > 0 || retry || firsttick;
+
+		if (g_Vars.lvupdate60 > 0) {
+			chr->lastawake60 = g_Vars.lvframe60;
+		}
+#endif
 		chr->sleep = 0;
 
+#ifndef PLATFORM_N64
+		if (aitick)
+#endif
 		chraiExecute(chr, PROPTYPE_CHR);
 
 		// Consider setting shootingatmelist
+#ifndef PLATFORM_N64
+		if (chr->prop && aitick) {
+#else
 		if (chr->prop) {
+#endif
 			if (chr->aimtesttimer60 < 1) {
 				chr->aimtesttimer60 = TICKS(30);
 
@@ -13333,6 +13511,9 @@ void chraTick(struct chrdata *chr)
 
 		// Consider setting darkroomlist
 		if (chr->prop
+#ifndef PLATFORM_N64
+				&& aitick
+#endif
 				&& chr->aidarkroomlist >= 0
 				&& roomGetSettledLocalBrightness(chr->prop->rooms[0]) < 25
 				&& ailistFindById(chr->aidarkroomlist) != chr->ailist) {
@@ -13340,7 +13521,11 @@ void chraTick(struct chrdata *chr)
 		}
 
 		// Consider setting playerdeadlist
+#ifndef PLATFORM_N64
+		if (chr->prop && aitick && chr->aiplayerdeadlist >= 0 && g_Vars.currentplayer->isdead) {
+#else
 		if (chr->prop && chr->aiplayerdeadlist >= 0 && g_Vars.currentplayer->isdead) {
+#endif
 			u32 prevplayernum = g_Vars.currentplayernum;
 			s32 i;
 			s32 playercount = PLAYERCOUNT();
@@ -13410,6 +13595,9 @@ void chraTick(struct chrdata *chr)
 		}
 
 #if VERSION >= VERSION_NTSC_1_0
+#ifndef PLATFORM_N64
+		if (aitick) // (kept until the AI list has seen it)
+#endif
 		chr->hidden &= ~CHRHFLAG_IS_HEARING_TARGET;
 		chr->hidden2 &= ~CHRH2FLAG_CONSIDERPROXIES;
 #else
@@ -15264,6 +15452,25 @@ struct prop *chrSpawnAtChr(struct chrdata *basechr, s32 body, s32 head, u32 chrn
 	if (1) {
 		fvalue = chrGetInverseTheta(chr);
 	}
+
+#ifndef PLATFORM_N64
+	// MOD: spawning at a hidden chr - a hidden chr has no collision, so a chr
+	// spawned at one (Attack Ship's bridge spawners send clones out of
+	// themselves) was put exactly where it stands, and when it came out of
+	// hiding the two stood inside each other and stayed stuck like that.
+	// Try with it solid first (the new chr goes beside it), then as before.
+	if (chr->chrflags & CHRCFLAG_HIDDEN) {
+		struct prop *spawned;
+
+		chr->chrflags &= ~CHRCFLAG_HIDDEN;
+		spawned = chrSpawnAtCoord(body, head, &chr->prop->pos, chr->prop->rooms, fvalue, ailist, spawnflags);
+		chr->chrflags |= CHRCFLAG_HIDDEN;
+
+		if (spawned) {
+			return spawned;
+		}
+	}
+#endif
 
 	return chrSpawnAtCoord(body, head, &chr->prop->pos, chr->prop->rooms, fvalue, ailist, spawnflags);
 }

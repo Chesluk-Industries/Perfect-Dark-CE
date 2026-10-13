@@ -31,7 +31,19 @@
 #define MAX_SEQ_SIZE_4MB 1024 * 14
 #define MAX_SEQ_SIZE_8MB 1024 * 18
 
-#define NUM_CACHE_SLOTS 45
+/**
+ * MOD: sound capacity - the PC port has memory to spare, so the sound system's
+ * limits are four times the N64's (SND_SCALE): voices, sounds playing at once,
+ * events, the sound header cache and the audio heap. With the N64's limits,
+ * busy fights (gunfire, thuds, sparks) ran out of voices and cut sounds off.
+ */
+#ifdef PLATFORM_N64
+#define SND_SCALE 1
+#else
+#define SND_SCALE 4
+#endif
+
+#define NUM_CACHE_SLOTS (45 * SND_SCALE)
 #define NUM_KEYTHINGS 9
 
 struct sndcache {
@@ -1463,6 +1475,8 @@ void sndInit(void)
 	heaplen = 1024 * 745;
 #endif
 
+	heaplen *= SND_SCALE; // MOD: sound capacity
+
 	g_Vars.langfilteron = false;
 
 	if (IS4MB()) {
@@ -1534,9 +1548,9 @@ void sndInit(void)
 			g_SeqRomAddrs[i] = g_SeqTable->entries[i].romaddr + (romptr_t) REF_SEG _sequencesSegmentRomStart;
 		}
 
-		synconfig.maxVVoices = 44;
-		synconfig.maxPVoices = 30;
-		synconfig.maxUpdates = 64;
+		synconfig.maxVVoices = 44 * SND_SCALE;
+		synconfig.maxPVoices = 30 * SND_SCALE;
+		synconfig.maxUpdates = 64 * SND_SCALE;
 		synconfig.dmaproc = NULL;
 		synconfig.outputRate = 0;
 		synconfig.heap = &g_SndHeap;
@@ -1546,9 +1560,9 @@ void sndInit(void)
 			synconfig.fxTypes[i] = 6;
 		}
 
-		sndpconfig.maxEvents = 64;
-		sndpconfig.maxStates = 64;
-		sndpconfig.maxSounds = 20;
+		sndpconfig.maxEvents = 64 * SND_SCALE;
+		sndpconfig.maxStates = 64 * SND_SCALE;
+		sndpconfig.maxSounds = 20 * SND_SCALE;
 		sndpconfig.unk10 = NUM_KEYTHINGS;
 		sndpconfig.heap = &g_SndHeap;
 
@@ -1778,8 +1792,8 @@ void snd0000fe80(void)
 void sndTick(void)
 {
 #if VERSION >= VERSION_NTSC_1_0
-	struct sndstate *stateptrs[64];
-	struct sndstate states[64];
+	struct sndstate *stateptrs[64 * SND_SCALE]; // MOD: sound capacity (one per sound state)
+	struct sndstate states[64 * SND_SCALE];
 	s32 i;
 	s32 curtime;
 	struct sndstate *state;

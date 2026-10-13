@@ -167,6 +167,9 @@ void chrTickGoPos(struct chrdata *chr);
 void chrTickPatrol(struct chrdata *chr);
 bool chrStartSkJump(struct chrdata *chr, u8 arg1, u8 arg2, s32 arg3, u8 arg4);
 void chrTickSkJump(struct chrdata *chr);
+#ifndef PLATFORM_N64
+void chrSkJumpGetPos(struct chrdata *chr, struct coord *pos); // MOD: smooth skjump
+#endif
 void chraTick(struct chrdata *chr);
 void cutsceneStart(u32 ailistid);
 void chraTickBg(void);

@@ -10,7 +10,7 @@
 
 #define CONFIG_MAX_SECNAME 128
 #define CONFIG_MAX_KEYNAME 256
-#define CONFIG_MAX_SETTINGS 300
+#define CONFIG_MAX_SETTINGS 512 // MOD: config capacity - was 300; later keys were silently dropped
 
 typedef enum {
 	CFG_NONE,
@@ -220,17 +220,33 @@ s32 configSave(const char *fname)
 
 	char tmpSec[CONFIG_MAX_SECNAME + 1] = { 0 };
 	char curSec[CONFIG_MAX_SECNAME + 1] = { 0 };
-	configGetSection(curSec, &settings[0]);
-	fprintf(f, "[%s]\n", curSec);
 
+	// MOD: ini sections - each section once, in the order they first
+	// appear (settings of a section registered in different places used to
+	// give it more than one [Section] block)
 	for (s32 i = 0; i < numSettings; ++i) {
-		struct configentry *cfg = &settings[i];
-		configGetSection(tmpSec, cfg);
-		if (strncmp(curSec, tmpSec, CONFIG_MAX_SECNAME) != 0) {
-			fprintf(f, "\n[%s]\n", tmpSec);
-			strncpy(curSec, tmpSec, CONFIG_MAX_SECNAME);
+		s32 seen = 0;
+
+		configGetSection(curSec, &settings[i]);
+
+		for (s32 j = 0; j < i && !seen; ++j) {
+			configGetSection(tmpSec, &settings[j]);
+			seen = strncmp(curSec, tmpSec, CONFIG_MAX_SECNAME) == 0;
 		}
-		configSaveEntry(cfg, f);
+
+		if (seen) {
+			continue;
+		}
+
+		fprintf(f, i ? "\n[%s]\n" : "[%s]\n", curSec);
+
+		for (s32 k = i; k < numSettings; ++k) {
+			configGetSection(tmpSec, &settings[k]);
+
+			if (strncmp(curSec, tmpSec, CONFIG_MAX_SECNAME) == 0) {
+				configSaveEntry(&settings[k], f);
+			}
+		}
 	}
 
 	fsFileFree(f);

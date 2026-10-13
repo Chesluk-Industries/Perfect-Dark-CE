@@ -1639,6 +1639,49 @@ void playerTickMpSwirl(void)
 	// but the swirl position should only be updated once per frame,
 	// so it's only updated for the player at index 0.
 	if (g_Vars.currentplayerindex == 0) {
+#ifndef PLATFORM_N64
+		// MOD: smooth swirl - the multiplayer intro camera moved in whole
+		// 60ths; it now moves in part steps too (the same at 60 FPS)
+		f32 steps = g_Vars.lvupdate240 * 0.25f;
+
+		while (steps > 0.0f) {
+			f32 t = steps < 1.0f ? steps : 1.0f;
+
+			steps -= 1.0f;
+
+			// Calculate rotation
+			if (g_MpSwirlAngleDegrees < 179.5f) {
+				if (g_MpSwirlAngleDegrees < -20) {
+					g_MpSwirlRotateSpeed += 0.1f * t;
+				}
+
+				if (g_MpSwirlAngleDegrees > 110) {
+					g_MpSwirlRotateSpeed -= 0.1f * t;
+				}
+
+				g_MpSwirlAngleDegrees += g_MpSwirlRotateSpeed * t;
+			}
+
+			if (g_MpSwirlAngleDegrees >= 179.5f) {
+				g_MpSwirlAngleDegrees = 180.0f;
+			}
+
+			// Calculate distance
+			if (g_MpSwirlAngleDegrees > 80) {
+				if (g_MpSwirlDistance > 60) {
+					g_MpSwirlForwardSpeed -= 0.1f * t;
+				} else {
+					g_MpSwirlForwardSpeed += 0.015f * t;
+				}
+
+				g_MpSwirlDistance += g_MpSwirlForwardSpeed * t;
+
+				if (g_MpSwirlDistance < 1) {
+					g_MpSwirlDistance = 1;
+				}
+			}
+		}
+#else
 		for (i = 0; i < g_Vars.lvupdate60; i++) {
 			// Calculate rotation
 			if (g_MpSwirlAngleDegrees < 179.5f) {
@@ -1672,6 +1715,7 @@ void playerTickMpSwirl(void)
 				}
 			}
 		}
+#endif
 	}
 
 	angle = (g_MpSwirlAngleDegrees - g_Vars.currentplayer->vv_theta) * M_PI / 180.0f;
@@ -3194,7 +3238,13 @@ void playerTickTeleport(f32 *aspectratio)
 	if (g_Vars.currentplayer->teleportstate == TELEPORTSTATE_EXITING) {
 		u32 time = g_Vars.currentplayer->teleporttime + g_Vars.lvupdate60;
 
+#ifndef PLATFORM_N64
+		// MOD: high framerates - the first steps were one per frame, so the
+		// exit warp was cut short above 60 FPS. One per 60th.
+		if (g_Vars.currentplayer->teleporttime < 7 && g_Vars.lvupdate60 > 0) {
+#else
 		if (g_Vars.currentplayer->teleporttime < 7) {
+#endif
 			time = g_Vars.currentplayer->teleporttime + 1;
 		}
 

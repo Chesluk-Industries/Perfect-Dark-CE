@@ -2295,8 +2295,29 @@ Gfx *bviewDrawIrLens(Gfx *gdl)
 		scanbottom = viewtop;
 	}
 
+#ifndef PLATFORM_N64
+	{
+		// MOD: IR scanner - the scan line moved and the rows faded by a set
+		// amount per drawn frame, so at 240 FPS the sweep went four times as
+		// fast. They now move by the frame's time, as at 60 FPS.
+		static f32 scanacc[4];
+		static f32 fadeacc[4];
+		s32 pn = g_Vars.currentplayernum & 3;
+		f32 frac = g_Vars.diffframe240 * 0.25f;
+
+		scanacc[pn] += (f32) scanrate * i / 240.0f * frac;
+		fadeacc[pn] += (f32) faderate * i / 240.0f * frac;
+
+		scanincrement = (s32) scanacc[pn];
+		fadeincrement = (s32) fadeacc[pn];
+
+		scanacc[pn] -= scanincrement;
+		fadeacc[pn] -= fadeincrement;
+	}
+#else
 	scanincrement = (f32) scanrate * i / 240.0f;
 	fadeincrement = (f32) faderate * i / 240.0f;
+#endif
 
 	// This code runs on the first frame of IR use (90 != 0),
 	// and in debug versions developers could change the radius at runtime.

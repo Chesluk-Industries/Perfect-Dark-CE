@@ -36,6 +36,11 @@ void aPoleFilterImpl(uint8_t flags, int16_t gain, uint32_t t, uint32_t addr);
 void aDisableImpl(uint16_t outp, uint32_t b, uint32_t c);
 void aPlayMP3Impl(const void *mp3file, u32 mp3size, void *out, int reset);
 
+// MOD: surround 5.1
+void mixerSetRear51(int enabled);
+void mixerSetDolby(int enabled); // MOD: Dolby Surround
+void mixerRearPop(int16_t *dst, int frames);
+
 #define aDisable(pkt, o, b, c) aDisableImpl(o, b, c)
 #define aClearBuffer(pkt, d, c) aClearBufferImpl(d, c)
 #define aLoadBuffer(pkt, c, d, s) aLoadBufferImpl((void *)(s), d, c)

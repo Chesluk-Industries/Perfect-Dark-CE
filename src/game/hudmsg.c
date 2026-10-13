@@ -1278,6 +1278,11 @@ void hudmsgsTick(void)
 			} else {
 				// Most HUD messages play a swish sound effect
 				if (msg->timer == 0
+#ifndef PLATFORM_N64
+						// MOD: high framerates - only on the frame the timer
+						// moves (it stays 0 for several frames above 60 FPS)
+						&& g_Vars.lvupdate60 > 0
+#endif
 						&& !lvIsPaused()
 						&& !mpIsPaused()
 #if VERSION >= VERSION_NTSC_1_0

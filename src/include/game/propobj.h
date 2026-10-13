@@ -117,6 +117,10 @@ s32 func0f06cd00(struct defaultobj *obj, struct coord *pos, struct coord *arg2, 
 bool func0f06d37c(struct defaultobj *obj, struct coord *arg1, struct coord *arg2, struct coord *arg3);
 void applySpeed(f32 *distdone, f32 maxdist, f32 *speed, f32 accel, f32 decel, f32 maxspeed);
 void applyRotation(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32 maxspeed);
+#ifndef PLATFORM_N64
+void applySpeed60(f32 *distdone, f32 maxdist, f32 *speed, f32 accel, f32 decel, f32 maxspeed); // MOD: smooth speed
+void applyRotation60(f32 *angle, f32 maxrot, f32 *speed, f32 accel, f32 decel, f32 maxspeed);
+#endif
 void projectileFall(struct defaultobj *obj, f32 mtx[3][3]);
 void knifePlayWooshSound(struct defaultobj *obj);
 void func0f06e9cc(struct coord *arg0, Mtxf *arg1);
@@ -162,6 +166,9 @@ void doorUpdatePortalIfWindowed(struct prop *door, s32 playercount);
 void doorInitMatrices(struct prop *door);
 void platformDisplaceProps(struct prop *platform, s16 *propnums, struct coord *prevpos, struct coord *newpos);
 void liftTick(struct prop *lift);
+#ifndef PLATFORM_N64
+void liftForgetSilentStarts(void); // MOD: cutscene lift sound
+#endif
 void escastepTick(struct prop *escalator);
 void cctvTick(struct prop *camera);
 void cctvInitMatrices(struct prop *cctv, Mtxf *mtx);

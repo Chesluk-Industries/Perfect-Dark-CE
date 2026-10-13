@@ -43,6 +43,20 @@ void sysCpuRelax(void);
 
 void crashInit(void);
 void crashShutdown(void);
+// MOD: crash logs: puts the crash handler back if something loaded later
+// (a graphics driver) replaced it
+void crashReinstall(void);
+
+// MOD: crash logs
+// Writes pd.crash.log (latest) and pd.crash-<date>-<time>.log next to pd.log:
+// the given text, the extra info from the registered callback and the last
+// lines of the log (kept in memory even without --log)
+void sysWriteCrashLog(const char *text);
+// Writes a short pd.crash.log straight away, before the crash handler does
+// anything that could fail (stack walk, extra info); the full log replaces it
+void sysWriteCrashLogEarly(const char *text);
+// Extra info for crash logs (e.g. what a module was doing)
+void sysSetCrashInfoCallback(void (*fn)(char *buf, s32 len));
 
 #ifdef __cplusplus
 }

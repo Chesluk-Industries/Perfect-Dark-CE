@@ -52,6 +52,9 @@
 #include "video.h"
 #include "input.h"
 #include "platform.h"
+#ifndef PLATFORM_N64
+#include "system.h" // MOD: menu capacity - sysLogPrintf
+#endif
 #define BLUR_OFS 10
 #else
 #define BLUR_OFS 30
@@ -957,6 +960,15 @@ void func0f0f1d6c(struct menudialogdef *dialogdef, struct menudialog *dialog, st
 
 			numblocksthisitem = -1;
 			menuGetItemBlocksRequired(item, &numblocksthisitem);
+
+#ifndef PLATFORM_N64
+			// MOD: menu capacity - never write past the menu's row/item-data arrays
+			if (rowindex >= (s32)ARRAYCOUNT(menu->rows) || colindex >= (s32)ARRAYCOUNT(menu->cols)
+					|| (numblocksthisitem != -1 && blockindex + numblocksthisitem > (s32)ARRAYCOUNT(menu->blocks))) {
+				sysLogPrintf(LOG_WARNING, "MENU: dialog too large for the menu buffers, truncated at item %d", itemindex);
+				break;
+			}
+#endif
 
 			if (numblocksthisitem != -1) {
 				menu->rows[rowindex].blockindex = blockindex;
@@ -4283,7 +4295,11 @@ void dialogTick(struct menudialog *dialog, struct menuinputs *inputs, u32 tickfl
 	if (dialog->state == MENUDIALOGSTATE_PREOPEN) {
 		if (dialog->definition == &g_MpReadyMenuDialog) {
 			if (dialog->statefrac < 0.1f) {
+#ifndef PLATFORM_N64
+				dialog->statefrac += 0.04f * (g_Vars.diffframe240 * 0.25f); // MOD: per 60th, not per frame
+#else
 				dialog->statefrac += 0.04f;
+#endif
 			} else {
 				dialog->state = MENUDIALOGSTATE_OPENING;
 				dialog->redrawtimer = 0.0f;

@@ -79,7 +79,7 @@
  * rwdata (such as the selected head).
  */
 
-#if VERSION >= VERSION_PAL_BETA
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64) // MOD: smooth gun (PAL's tweened gun joints)
 u8 var8005efb0_2 = 0;
 #endif
 
@@ -91,7 +91,7 @@ bool var8005efbc = false;
 f32 var8005efc0 = 0;
 bool (*var8005efc4)(struct model *model, struct modelnode *node) = NULL;
 
-#if VERSION >= VERSION_PAL_BETA
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64) // MOD: smooth gun (PAL's tweened gun joints)
 bool var8005efd8_2 = false;
 #endif
 
@@ -619,8 +619,68 @@ f32 modelTweenRotAxis(f32 curangle, f32 goalangle, f32 mult)
 	return curangle;
 }
 
+#ifndef PLATFORM_N64
+// MOD: roll fix - a joint's rotation can be stored as either of two equivalent
+// Euler triples, (x, y, z) or (x + pi, pi - y, z + pi). Some animations (the
+// guards' roll attacks) switch between them from one frame to the next while
+// the body is upside down, and tweening each axis separately then swings the
+// body through a wildly wrong pose for the in-between frames. If the other
+// triple is closer to the current rotation, tween towards that one instead.
+// Both triples are the same orientation, so whole frames are unchanged.
+static f32 modelRotAxisDist(f32 a, f32 b)
+{
+	f32 d = b - a;
+
+	if (d < 0) {
+		d = -d;
+	}
+
+	if (d > M_BADPI) {
+		d = M_BADTAU - d;
+	}
+
+	return d;
+}
+
+static f32 modelRotAxisWrap(f32 a)
+{
+	while (a >= M_BADTAU) {
+		a -= M_BADTAU;
+	}
+
+	while (a < 0) {
+		a += M_BADTAU;
+	}
+
+	return a;
+}
+
+static void modelTweenRotPickGoal(struct coord *currot, struct coord *goalrot, struct coord *out)
+{
+	struct coord alt;
+
+	alt.x = modelRotAxisWrap(goalrot->x + M_BADPI);
+	alt.y = modelRotAxisWrap(M_BADPI - goalrot->y);
+	alt.z = modelRotAxisWrap(goalrot->z + M_BADPI);
+
+	if (modelRotAxisDist(currot->x, alt.x) + modelRotAxisDist(currot->y, alt.y) + modelRotAxisDist(currot->z, alt.z)
+			< modelRotAxisDist(currot->x, goalrot->x) + modelRotAxisDist(currot->y, goalrot->y) + modelRotAxisDist(currot->z, goalrot->z)) {
+		*out = alt;
+	} else {
+		*out = *goalrot;
+	}
+}
+#endif
+
 void modelTweenRot(struct coord *currot, struct coord *goalrot, f32 mult)
 {
+#ifndef PLATFORM_N64
+	struct coord goal;
+
+	modelTweenRotPickGoal(currot, goalrot, &goal); // MOD: roll fix
+	goalrot = &goal;
+#endif
+
 	currot->x = modelTweenRotAxis(currot->x, goalrot->x, mult);
 	currot->y = modelTweenRotAxis(currot->y, goalrot->y, mult);
 	currot->z = modelTweenRotAxis(currot->z, goalrot->z, mult);
@@ -1100,7 +1160,7 @@ void modelUpdatePositionNodeMtx(struct modelrenderdata *renderdata, struct model
 				animGetRotTranslateScale(animpart, anim->flip, skel, anim->animnum, anim->frameslot2, &rot2, &translate2, &scale2);
 				modelTweenRot(&rot1, &rot2, spe0);
 
-#if VERSION >= VERSION_PAL_BETA
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64) // MOD: smooth gun (PAL's tweened gun joints)
 				if (sp128 || var8005efd8_2)
 #else
 				if (sp128)
@@ -1554,7 +1614,7 @@ void modelSetMatrices(struct modelrenderdata *renderdata, struct model *model)
 
 	renderdata->unk10 += model->definition->nummatrices;
 
-#if VERSION >= VERSION_PAL_BETA
+#if VERSION >= VERSION_PAL_BETA || !defined(PLATFORM_N64) // MOD: smooth gun (PAL's tweened gun joints)
 	if (var8005efb0_2 || !modelasm00018680(renderdata, model)) {
 		modelUpdateMatrices(renderdata, model);
 	}

@@ -34,7 +34,7 @@
 #define ROUND_UP_8(v) (((v) + 7) & ~7)
 #define ROUND_DOWN_16(v) ((v) & ~0xf)
 
-#define BUF_SIZE 3072 // 2720 + slack
+#define BUF_SIZE 4096 // 2720 + slack, + MOD: surround 5.1 rear buffers
 #define BUF_U8(a) (rspa.buf.as_u8 + (a))
 #define BUF_S16(a) (rspa.buf.as_s16 + (a) / sizeof(int16_t))
 
@@ -47,6 +47,77 @@
 #define OFS_MAIN_R 0x650
 #define OFS_AUX_L 0x7C0
 #define OFS_AUX_R 0x930
+
+// MOD: surround 5.1 - rear left/right buffers (past naudio's DMEM map, with slack)
+#define OFS_REAR_L 0xB00
+#define OFS_REAR_R 0xC80
+
+/**
+ * MOD: surround 5.1 - in the game's Surround sound mode, sounds behind the
+ * player are marked "rear" (on the N64 this put them out of phase for a Dolby
+ * Surround decoder; the mixer's low bits of the dry/wet gains carry the mark:
+ * a sound is rear when they differ). With 5.1 output enabled, the env mixer
+ * sends a rear sound's dry (direct) signal into the rear buffers instead of
+ * the front ones; its reverb send is unchanged. When the front is interleaved
+ * for output, the rear is queued here for the audio output to add as the rear
+ * channels of the same samples.
+ */
+static int g_MixerRear51 = 0;
+
+#define REAR_FIFO_FRAMES 16384
+static int16_t g_RearFifo[REAR_FIFO_FRAMES * 2];
+static int g_RearFifoStart = 0;
+static int g_RearFifoCount = 0;
+
+// MOD: Dolby Surround - stereo output: rear sounds out of phase (left +, right -)
+static int g_MixerDolby = 0;
+
+void mixerSetDolby(int enabled) {
+    g_MixerDolby = enabled;
+}
+
+void mixerSetRear51(int enabled) {
+    g_MixerRear51 = enabled;
+}
+
+static void mixerRearPush(const int16_t *l, const int16_t *r, int frames) {
+    for (int i = 0; i < frames; ++i) {
+        int pos;
+
+        if (g_RearFifoCount >= REAR_FIFO_FRAMES) {
+            // full: drop the oldest
+            g_RearFifoStart = (g_RearFifoStart + 1) % REAR_FIFO_FRAMES;
+            g_RearFifoCount--;
+        }
+
+        pos = (g_RearFifoStart + g_RearFifoCount) % REAR_FIFO_FRAMES;
+        g_RearFifo[pos * 2 + 0] = l[i];
+        g_RearFifo[pos * 2 + 1] = r[i];
+        g_RearFifoCount++;
+    }
+}
+
+// Take the rear samples for the next output buffer of the given length. The
+// buffer handed to the output is the one rendered before the current one, and
+// it's all that's queued at that point, so any older surplus is dropped.
+void mixerRearPop(int16_t *dst, int frames) {
+    while (g_RearFifoCount > frames) {
+        g_RearFifoStart = (g_RearFifoStart + 1) % REAR_FIFO_FRAMES;
+        g_RearFifoCount--;
+    }
+
+    for (int i = 0; i < frames; ++i) {
+        if (g_RearFifoCount > 0) {
+            dst[i * 2 + 0] = g_RearFifo[g_RearFifoStart * 2 + 0];
+            dst[i * 2 + 1] = g_RearFifo[g_RearFifoStart * 2 + 1];
+            g_RearFifoStart = (g_RearFifoStart + 1) % REAR_FIFO_FRAMES;
+            g_RearFifoCount--;
+        } else {
+            dst[i * 2 + 0] = 0;
+            dst[i * 2 + 1] = 0;
+        }
+    }
+}
 
 static struct {
     int16_t vol[2];
@@ -138,6 +209,14 @@ void aLoadADPCMImpl(int num_entries_times_16, const int16_t *book_source_addr) {
 }
 
 void aInterleaveImpl(void) {
+    // MOD: surround 5.1 - queue this chunk's rear channels, then clear them
+    if (g_MixerRear51) {
+        mixerRearPush(BUF_S16(OFS_REAR_L), BUF_S16(OFS_REAR_R), NUM_SAMPLES);
+    }
+
+    memset(BUF_U8(OFS_REAR_L), 0, ROUND_UP_16(NUM_BYTES));
+    memset(BUF_U8(OFS_REAR_R), 0, ROUND_UP_16(NUM_BYTES));
+
     const int16_t *l = BUF_S16(OFS_MAIN_L);
     const int16_t *r = BUF_S16(OFS_MAIN_R);
     int count = ROUND_UP_16(NUM_SAMPLES) / 8;
@@ -517,6 +596,7 @@ void aEnvMixerImpl(uint8_t flags, ENVMIX_STATE state, int16_t rvol) {
         int16_t tgt[2];
         int16_t voldry;
         int16_t volwet;
+        int32_t rearfrac; // MOD: surround 5.1 - how far the direct signal is in the rear (0 to 1 << 15)
     } *savedstate = (void *)state;
 
     rspa.vol[1] = rvol; // why the fuck is this here?
@@ -543,6 +623,18 @@ void aEnvMixerImpl(uint8_t flags, ENVMIX_STATE state, int16_t rvol) {
         }
         voldry = savedstate->voldry;
         volwet = savedstate->volwet;
+    }
+
+    // MOD: surround 5.1 - a rear sound's direct signal goes to the rear. When
+    // a sound crosses between front and rear (around 45 degrees off centre)
+    // it fades across over about 80ms instead of jumping.
+    int16_t *rear[2] = {BUF_S16(OFS_REAR_L), BUF_S16(OFS_REAR_R)};
+    int32_t reartarget = ((g_MixerRear51 || g_MixerDolby) && ((voldry ^ volwet) & 1)) ? (1 << 15) : 0;
+    int32_t rearfrac = (flags & A_INIT) ? reartarget : savedstate->rearfrac;
+    const int32_t rearstep = (1 << 15) / 1792;
+
+    if (rearfrac < 0 || rearfrac > (1 << 15)) {
+        rearfrac = reartarget;
     }
 
     #ifdef PLATFORM_BIG_ENDIAN
@@ -576,8 +668,43 @@ void aEnvMixerImpl(uint8_t flags, ENVMIX_STATE state, int16_t rvol) {
         gain[3] = clamp16((vol[1] * volwet + 0x4000) >> 15);
 
         const int16_t insamp = in[i^XOR];
-        for (int j = 0; j < 4; ++j) {
-            *outptr[j] = clamp16(*outptr[j] + ((insamp * gain[j]) >> 15));
+
+        if (rearfrac != reartarget) {
+            rearfrac += (reartarget > rearfrac) ? rearstep : -rearstep;
+
+            if (rearfrac < 0) {
+                rearfrac = 0;
+            }
+
+            if (rearfrac > (1 << 15)) {
+                rearfrac = 1 << 15;
+            }
+        }
+
+        if (rearfrac != 0) {
+            // split the direct signal between front and rear
+            for (int j = 0; j < 2; ++j) {
+                int32_t direct = (insamp * gain[j]) >> 15;
+                int32_t back = (direct * rearfrac) >> 15;
+
+                if (g_MixerRear51) {
+                    int16_t *rearptr = rear[j] + (i^XOR);
+
+                    *rearptr = clamp16(*rearptr + back);
+                    *outptr[j] = clamp16(*outptr[j] + direct - back);
+                } else {
+                    // MOD: Dolby Surround - the rear part out of phase on the right
+                    *outptr[j] = clamp16(*outptr[j] + (j == 0 ? direct : direct - 2 * back));
+                }
+            }
+
+            for (int j = 2; j < 4; ++j) {
+                *outptr[j] = clamp16(*outptr[j] + ((insamp * gain[j]) >> 15));
+            }
+        } else {
+            for (int j = 0; j < 4; ++j) {
+                *outptr[j] = clamp16(*outptr[j] + ((insamp * gain[j]) >> 15));
+            }
         }
     }
 
@@ -590,6 +717,21 @@ void aEnvMixerImpl(uint8_t flags, ENVMIX_STATE state, int16_t rvol) {
     }
     savedstate->voldry = voldry;
     savedstate->volwet = volwet;
+    savedstate->rearfrac = rearfrac;
+}
+
+// MOD: smooth panning - the volume a voice's envelope has reached (n_env.c);
+// the state is the one aEnvMixerImpl keeps (see the struct there)
+int mixerEnvGetVolume(void *state, int16_t *left, int16_t *right) {
+    const int32_t *t = state; // t[0], t[1]: 16.16 left/right volume
+
+    if (t == NULL) {
+        return 0;
+    }
+
+    *left = (int16_t)(t[0] >> 16);
+    *right = (int16_t)(t[1] >> 16);
+    return 1;
 }
 
 // flags is always 0 in PD

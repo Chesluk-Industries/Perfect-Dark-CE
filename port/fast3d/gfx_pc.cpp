@@ -167,6 +167,7 @@ static struct RDP {
         uint8_t siz;
         uint8_t cms, cmt;
         uint8_t shifts, shiftt;
+        uint8_t masks; // MOD: tile width
         uint16_t uls, ult, lrs, lrt; // U10.2
         uint16_t width, height;      // in texels
         uint16_t tmem;               // 0-511, in 64-bit word units
@@ -608,6 +609,61 @@ void gfx_texture_cache_delete_range(const uint8_t* start, const uint8_t* end) {
     }
 }
 
+/**
+ * MOD: tile width - a texture's TMEM lines are at least 8 bytes, so a narrow
+ * texture (say 4 texels of I8) has padding at the end of each line. The N64
+ * only samples the tile's own texels (wrapping at the mask), but the texture
+ * was imported a whole line wide, so the padding showed up as extra texels:
+ * the crossbow's limb edges (a 4x16 strip) got bumpy stripes. This is the
+ * width the texture really has.
+ */
+static uint32_t gfx_tile_content_width(int tile) {
+    uint32_t w = rdp.texture_tile[tile].line_size_bytes;
+
+    switch (rdp.texture_tile[tile].siz) {
+        case G_IM_SIZ_4b:
+            w <<= 1;
+            break;
+        case G_IM_SIZ_8b:
+            break;
+        case G_IM_SIZ_16b:
+            w /= G_IM_SIZ_16b_LINE_BYTES;
+            break;
+        case G_IM_SIZ_32b:
+            w /= G_IM_SIZ_32b_LINE_BYTES;
+            break;
+    }
+
+    if (w == 0) {
+        return 1;
+    }
+
+    if (rdp.texture_tile[tile].masks > 0) {
+        if ((1U << rdp.texture_tile[tile].masks) < w) {
+            w = 1U << rdp.texture_tile[tile].masks;
+        }
+    } else if (rdp.texture_tile[tile].width > 0 && rdp.texture_tile[tile].width < w) {
+        w = rdp.texture_tile[tile].width;
+    }
+
+    return w;
+}
+
+static uint32_t g_UploadCropWidth = 0; // MOD: tile width - set while importing
+
+static void gfx_upload_texture(uint8_t* buf, uint32_t width, uint32_t height, bool gen_mipmaps) {
+    // MOD: tile width - drop the padding at the end of each line
+    if (g_UploadCropWidth > 0 && g_UploadCropWidth < width) {
+        for (uint32_t y = 1; y < height; y++) {
+            memmove(buf + y * g_UploadCropWidth * 4, buf + y * width * 4, g_UploadCropWidth * 4);
+        }
+
+        width = g_UploadCropWidth;
+    }
+
+    gfx_rapi->upload_texture(buf, width, height, gen_mipmaps);
+}
+
 static void import_texture_rgba16(int tile, const LoadedTexture& loaded_texture, bool gen_mipmaps) {
     const uint8_t* addr = loaded_texture.addr;
     const uint32_t size_bytes = loaded_texture.size_bytes;
@@ -634,7 +690,7 @@ static void import_texture_rgba16(int tile, const LoadedTexture& loaded_texture,
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -655,7 +711,7 @@ static void import_texture_rgba32(int tile, const LoadedTexture& loaded_texture,
 
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     const uint32_t height = (size_bytes / 2) / rdp.texture_tile[tile].line_size_bytes;
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, addr, width, height);
 }
 
@@ -684,7 +740,7 @@ static void import_texture_ia4(int tile, const LoadedTexture& loaded_texture, bo
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes * 2;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -710,7 +766,7 @@ static void import_texture_ia8(int tile, const LoadedTexture& loaded_texture, bo
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -736,7 +792,7 @@ static void import_texture_ia16(int tile, const LoadedTexture& loaded_texture, b
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -763,7 +819,7 @@ static void import_texture_i4(int tile, const LoadedTexture& loaded_texture, boo
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes * 2;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -788,7 +844,7 @@ static void import_texture_i8(int tile, const LoadedTexture& loaded_texture, boo
     const uint32_t width = rdp.texture_tile[tile].line_size_bytes;
     const uint32_t height = size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
     // DumpTexture(loaded_texture.otr_path, rgba32_buf, width, height);
 }
 
@@ -838,7 +894,7 @@ static void import_texture_ci4(int tile, const LoadedTexture& loaded_texture, bo
     const uint32_t width = result_line_size * 2;
     const uint32_t height = size_bytes / result_line_size;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
 }
 
 static void import_texture_ci8(int tile, const LoadedTexture& loaded_texture, bool gen_mipmaps) {
@@ -864,7 +920,7 @@ static void import_texture_ci8(int tile, const LoadedTexture& loaded_texture, bo
     const uint32_t width = result_line_size;
     const uint32_t height = size_bytes / result_line_size;
 
-	gfx_rapi->upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
+	gfx_upload_texture(tex_upload_buffer, width, height, gen_mipmaps);
 }
 
 static void import_texture(int i, int tile, bool importReplacement) {
@@ -889,6 +945,29 @@ static void import_texture(int i, int tile, bool importReplacement) {
         loaded_texture.orig_size_bytes = loaded_texture.size_bytes;
     }
 
+    // MOD: texture quirks - a LOD texture is loaded in one block with its
+    // smaller mip levels packed after the image. Only the tile's own rows are
+    // the image: the extra rows went into the uploaded texture and its
+    // generated mipmaps, so far away or at a slant (smaller mips) the packed
+    // levels bled into the picture. Area 51's railing shadows (0x015a, a
+    // shadow pass over the rock) showed all over the rock.
+    if (rdp.tex_lod && loaded_texture.addr && rdp.texture_tile[tile].height > 0
+            && rdp.texture_tile[tile].line_size_bytes > 0
+            && loaded_texture.line_size_bytes == rdp.texture_tile[tile].line_size_bytes
+            && loaded_texture.full_image_line_size_bytes == loaded_texture.line_size_bytes) {
+        uint32_t crop = rdp.texture_tile[tile].line_size_bytes * rdp.texture_tile[tile].height;
+
+        if (siz == G_IM_SIZ_32b) {
+            crop <<= 1;
+        }
+
+        if (loaded_texture.size_bytes > crop) {
+            loaded_texture.size_bytes = crop;
+            loaded_texture.full_size_bytes = crop;
+            loaded_texture.orig_size_bytes = crop;
+        }
+    }
+
     const RawTexMetadata* metadata = &loaded_texture.raw_tex_metadata;
     const uint8_t* orig_addr = loaded_texture.addr;
     SUPPORT_CHECK(orig_addr);
@@ -903,6 +982,8 @@ static void import_texture(int i, int tile, bool importReplacement) {
     if (gfx_texture_cache_lookup(i, key)) {
         return;
     }
+
+    g_UploadCropWidth = gfx_tile_content_width(tile); // MOD: tile width
 
     if (fmt == G_IM_FMT_RGBA) {
         if (siz == G_IM_SIZ_16b) {
@@ -941,6 +1022,8 @@ static void import_texture(int i, int tile, bool importReplacement) {
     } else {
         sysFatalError("Bad texture format in tile %d: %02x %02x", tile, fmt, siz);
     }
+
+    g_UploadCropWidth = 0; // MOD: tile width
 }
 
 static void gfx_normalize_vector(float v[3]) {
@@ -1212,6 +1295,9 @@ static inline int gfx_lod_tile_offset(const int i) {
     return (rdp.tex_lod ? rdp.tex_detail : i);
 }
 
+extern "C" int texIsForcedOpaque(const void *addr); // MOD: texture quirks (texdecompress.c)
+extern bool gfx_decal_clamp_scope; // MOD: decal edge clamp - wallhits only (gfx_opengl.cpp)
+
 static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx, bool is_rect) {
     struct LoadedVertex* v1 = &rsp.loaded_vertices[vtx1_idx];
     struct LoadedVertex* v2 = &rsp.loaded_vertices[vtx2_idx];
@@ -1266,6 +1352,23 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx, bo
     bool depth_compare = (rdp.other_mode_l & Z_CMP) == Z_CMP;
     bool depth_source_prim = (rdp.other_mode_l & G_ZS_PRIM) == G_ZS_PRIM /* && gDP.primDepth.z == 1.0f */;
     uint16_t zmode = rdp.other_mode_l & ZMODE_DEC;
+
+    // MOD: texture quirks - textures that must look solid even when drawn in
+    // a translucent pass (texIsForcedOpaque, texdecompress.c): no blending,
+    // and they write depth like opaque surfaces, so what's behind them and
+    // drawn later doesn't show through
+    // (Whatever the render mode: blended, or not blended but without depth
+    // writes, as Area 51's rock 0x00fa that railing shadows showed through)
+    const bool quirk_opaque = !is_rect && depth_test
+        && (!depth_update || !depth_compare || zmode != ZMODE_OPA
+            || ((rdp.other_mode_l & (3 << 20)) == (G_BL_CLR_MEM << 20) && (rdp.other_mode_l & (3 << 16)) == (G_BL_1MA << 16)))
+        && texIsForcedOpaque(rdp.loaded_texture[rdp.texture_tile[rdp.first_tile_index].tmem].addr);
+
+    if (quirk_opaque) {
+        depth_update = true;
+        depth_compare = true;
+        zmode = ZMODE_OPA;
+    }
     uint8_t depth_mode = (depth_test ? 1 : 0) | (depth_update ? 2 : 0) | (depth_compare ? 4 : 0) | (depth_source_prim ? 8 : 0) | (zmode >> 6);
 
     if (depth_mode != rendering_state.depth_mode) {
@@ -1303,6 +1406,12 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx, bo
 
     if (texture_edge) {
         use_alpha = true;
+    }
+
+    // MOD: texture quirks - drawn solid (see the depth mode above); cutouts
+    // keep their alpha test
+    if (quirk_opaque && !texture_edge) {
+        use_alpha = false;
     }
 
     if (use_alpha) {
@@ -1382,7 +1491,7 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx, bo
                     tex_height[i] /= 2;
                     break;
             }
-            tex_width[i] = line_size;
+            tex_width[i] = gfx_tile_content_width(tile); // MOD: tile width (was the whole line)
 
             tex_width2[i] = (rdp.texture_tile[tile].lrs - rdp.texture_tile[tile].uls + 4) / 4;
             tex_height2[i] = (rdp.texture_tile[tile].lrt - rdp.texture_tile[tile].ult + 4) / 4;
@@ -1812,6 +1921,7 @@ static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t t
     rdp.texture_tile[tile].cmt = cmt;
     rdp.texture_tile[tile].shifts = shifts;
     rdp.texture_tile[tile].shiftt = shiftt;
+    rdp.texture_tile[tile].masks = masks; // MOD: tile width
     rdp.texture_tile[tile].line_size_bytes = line * 8;
     rdp.texture_tile[tile].tmem = tmem;
 
@@ -2523,6 +2633,10 @@ static void gfx_run_dl(Gfx* cmd) {
                 gfx_flush();
                 gfx_rapi->clear_framebuffer(false, true);
                 break;
+            case G_DECALCLAMP_EXT: // MOD: decal edge clamp - wallhits only
+                gfx_flush();
+                gfx_decal_clamp_scope = (cmd->words.w0 & 1) != 0;
+                break;
             case G_RDPPIPESYNC:
             case G_RDPFULLSYNC:
             case G_RDPLOADSYNC:
@@ -2590,6 +2704,7 @@ extern "C" struct GfxRenderingAPI* gfx_get_current_rendering_api(void) {
 }
 
 extern "C" void gfx_start_frame(void) {
+    gfx_decal_clamp_scope = false; // MOD: decal edge clamp
     gfx_wapi->handle_events();
     gfx_wapi->get_dimensions(&gfx_current_window_dimensions.width, &gfx_current_window_dimensions.height,
                              &gfx_current_window_position_x, &gfx_current_window_position_y);

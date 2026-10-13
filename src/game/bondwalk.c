@@ -705,7 +705,11 @@ void bwalk0f0c4d98(void)
 	// empty
 }
 
+#ifndef PLATFORM_N64
+void bwalkUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, f32 mult)
+#else
 void bwalkUpdateSpeedSideways(f32 targetspeed, f32 accelspeed, s32 mult)
+#endif
 {
 	if (g_Vars.normmplayerisrunning) {
 		targetspeed = (g_PlayerConfigsArray[g_Vars.currentplayerstats->mpindex].base.unk1c + 25.0f) / 100 * targetspeed;
@@ -1371,6 +1375,19 @@ void bwalkApplyMoveData(struct movedata *data)
 {
 	if (g_Vars.currentplayer->walkinitmove == false) {
 		// Sideways
+#ifndef PLATFORM_N64
+		// MOD: high framerates - by the time passed, not the number of input
+		// samples (one per frame: strafing sped up 4x as fast at 240 FPS)
+		if (data->digitalstepleft) {
+			bwalkUpdateSpeedSideways(-1, 0.2f, g_Vars.lvupdate60f);
+		} else if (data->digitalstepright) {
+			bwalkUpdateSpeedSideways(1, 0.2f, g_Vars.lvupdate60f);
+		} else if (data->unk14 == false) {
+			bwalkUpdateSpeedSideways(0, 0.2f, g_Vars.lvupdate60f);
+		} else {
+			bwalkUpdateSpeedSideways(data->analogstrafe * 0.014285714365542f, 0.2f, g_Vars.lvupdate60f);
+		}
+#else
 		if (data->digitalstepleft) {
 			bwalkUpdateSpeedSideways(-1, 0.2f, data->digitalstepleft);
 		} else if (data->digitalstepright) {
@@ -1380,6 +1397,7 @@ void bwalkApplyMoveData(struct movedata *data)
 		} else if (data->unk14){
 			bwalkUpdateSpeedSideways(data->analogstrafe * 0.014285714365542f, 0.2f, g_Vars.lvupdate60);
 		}
+#endif
 
 
 		// Forward/back
@@ -1585,6 +1603,13 @@ void bwalk0f0c69b8(void)
 			lvupdate240 = g_Vars.lvupdate60;
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: high framerates - by fractional 60ths (whole ones only made
+		// leaning move in jerks)
+		if (lvupdate60f != (f32)lvupdate240) {
+			spa8 = dist * (1.0f - __builtin_powf(1.0f - PALUPF(0.1f), lvupdate60f));
+		} else
+#endif
 		for (i = 0; i < lvupdate240; i++) {
 			spa8 += (dist - spa8) * PALUPF(0.1f);
 		}

@@ -9,7 +9,12 @@ void shardsReset(void)
 {
 	s32 i;
 
+#ifndef PLATFORM_N64
+	// MOD: co-op effects - as many glass shards in co-op/counter-op as solo
+	g_MaxShards = g_Vars.normmplayerisrunning ? 200 / PLAYERCOUNT() : 200;
+#else
 	g_MaxShards = 200 / PLAYERCOUNT();
+#endif
 
 	if (IS4MB()) {
 		g_MaxShards = g_MaxShards / 2;

@@ -25,5 +25,9 @@ void schedConsiderScreenshot(void);
 void schedSetCrashedUnexpectedly(bool enable);
 void schedStartFrame(OSSched *sc);
 void schedEndFrame(OSSched *sc);
+#ifndef PLATFORM_N64
+u8 *schedGetPlayerLightTable(void); // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
+s32 *schedGetPlayerSunTimers(void);
+#endif
 
 #endif

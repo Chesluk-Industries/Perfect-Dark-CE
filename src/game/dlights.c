@@ -28,6 +28,10 @@
 #include "lib/lib_317f0.h"
 #include "data.h"
 #include "types.h"
+
+#ifndef PLATFORM_N64
+extern s32 g_RoomShinyAlphaFloor; // MOD: shiny alpha fix (port/src/video.c)
+#endif
 #include "platform.h"
 
 const char var7f1a78e0[] = "LIGHTS : Hit occured on light %d in room %d\n";
@@ -971,7 +975,58 @@ void roomSetLightOp(s32 roomnum, s32 operation, u8 br_to, u8 br_from, u8 duratio
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: sparking lights - this is called for each broken light every time its
+ * glare is drawn (each frame, and once per player), and each call rolls the
+ * dice: at 120 fps lights sparked twice as often as at the port's default
+ * 60. The rolls are now made at most 60 times a second of game time, per
+ * light; calls in between repeat the last result (so a spark's flash lasts
+ * that 60th of a second), and the paused game doesn't roll.
+ */
+#define LIGHTSPARK_STEP240 4 // 240ths per roll (60 a second)
+#define LIGHTSPARK_CACHE 1024
+
+static struct {
+	s32 index; // which light (g_Rooms[].lightindex + lightnum), -1 = none
+	s32 step;  // lvframe240 / LIGHTSPARK_STEP240 when it last rolled
+	bool flash;
+} g_LightSparkCache[LIGHTSPARK_CACHE];
+
+static bool g_LightSparkCacheReady = false;
+
+static bool lightTickBrokenRoll(s32 roomnum, s32 lightnum);
+
 bool lightTickBroken(s32 roomnum, s32 lightnum)
+{
+	s32 index = g_Rooms[roomnum].lightindex + lightnum;
+	s32 step = g_Vars.lvframe240 / LIGHTSPARK_STEP240;
+	s32 slot = (u32) index % LIGHTSPARK_CACHE;
+	s32 i;
+
+	if (!g_LightSparkCacheReady) {
+		for (i = 0; i < LIGHTSPARK_CACHE; i++) {
+			g_LightSparkCache[i].index = -1;
+		}
+
+		g_LightSparkCacheReady = true;
+	}
+
+	if (g_LightSparkCache[slot].index == index && g_LightSparkCache[slot].step == step) {
+		return g_LightSparkCache[slot].flash;
+	}
+
+	g_LightSparkCache[slot].index = index;
+	g_LightSparkCache[slot].step = step;
+	g_LightSparkCache[slot].flash = lightTickBrokenRoll(roomnum, lightnum);
+
+	return g_LightSparkCache[slot].flash;
+}
+
+static bool lightTickBrokenRoll(s32 roomnum, s32 lightnum)
+#else
+bool lightTickBroken(s32 roomnum, s32 lightnum)
+#endif
 {
 	struct light *light = (struct light *)(g_BgLightsFileData + ((g_Rooms[roomnum].lightindex + lightnum) * 0x22));
 
@@ -1603,6 +1658,20 @@ void roomHighlight(s32 roomnum)
 				dst[i].g = src[i].g;
 				dst[i].b = src[i].b;
 				dst[i].a = src[i].a * (1.0f / 255.0f * br_settled_regional);
+
+#ifndef PLATFORM_N64
+				// MOD: shiny alpha fix (murkantor, see bgBuildShinyXluMask in bg.c) -
+				// opaque shiny surfaces don't fade out in the dark, glass still does
+				if (g_RoomShinyAlphaFloor > 0
+						&& (g_Rooms[roomnum].shinyxlumask == NULL
+							|| (g_Rooms[roomnum].shinyxlumask[i >> 5] & (1u << (i & 31))) == 0)) {
+					s32 minalpha = src[i].a * g_RoomShinyAlphaFloor / 255;
+
+					if (dst[i].a < minalpha) {
+						dst[i].a = minalpha;
+					}
+				}
+#endif
 			} else {
 				if (USINGDEVICE(DEVICE_NIGHTVISION) || USINGDEVICE(DEVICE_IRSCANNER)) {
 					tmpr = tmpg = tmpb = (src[i].r > src[i].g && src[i].r > src[i].b)

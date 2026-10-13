@@ -15,6 +15,7 @@
 #include "romdata.h"
 #include "config.h"
 #include "mod.h"
+#include "patch.h" // MOD: light patches - by joshuarwood (perfect_dark PR #722)
 #include "system.h"
 #include "utils.h"
 
@@ -67,7 +68,9 @@ void bootCreateSched(void)
 
 static void gameInit(void)
 {
-	osMemSize = g_OsMemSizeMb * 1024 * 1024;
+	// MOD: headroom for unlimited decals and ragdoll corpses (EXTRA_MEMP_MB,
+	// video.h) and the 4x audio heap (snd.c)
+	osMemSize = (g_OsMemSizeMb + EXTRA_MEMP_MB + 4) * 1024 * 1024;
 
 	for (s32 i = 0; i < MAX_PLAYERS; ++i) {
 		struct extplayerconfig *cfg = g_PlayerExtCfg + i;
@@ -105,13 +108,17 @@ int main(int argc, const char **argv)
 	fsInit();
 	configInit();
 	videoInit();
+	crashReinstall(); // MOD: crash logs (the graphics driver can replace the handler)
 	inputInit();
 	audioInit();
 	romdataInit();
+	patchInit(); // MOD: light patches - by joshuarwood (perfect_dark PR #722)
 
 	g_ValidGbcRomFound = romdataCheckGbcRom();
 
 	gameInit();
+
+	crashReinstall(); // MOD: crash logs
 
 	if (fsGetModDir()) {
 		modConfigLoad(MOD_CONFIG_FNAME);
@@ -169,6 +176,7 @@ PD_CONSTRUCTOR static void gameConfigInit(void)
 	configRegisterInt("Game.SkipIntro", &g_SkipIntro, 0, 1);
 	configRegisterInt("Game.DisableMpDeathMusic", &g_MusicDisableMpDeath, 0, 1);
 	configRegisterInt("Game.GEMuzzleFlashes", &g_BgunGeMuzzleFlashes, 0, 1);
+	configRegisterInt("Game.SplitscreenGlares", &g_SplitscreenGlares, 0, 1); // MOD: split-screen glares - by joshuarwood (perfect_dark PR #760)
 	configRegisterInt("Game.MaxExplosions", &g_MaxExplosions, 6, 96);
 	for (s32 j = 0; j < MAX_PLAYERS; ++j) {
 		const s32 i = j + 1;

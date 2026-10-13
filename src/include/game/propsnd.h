@@ -34,5 +34,8 @@ void psGetTheoreticalVolPan(struct coord *pos, RoomNum *rooms, s16 soundnum, s32
 void psApplyVolPan(struct sndstate *handle, struct coord *pos, f32 dist1, f32 dist2, f32 dist3, RoomNum *rooms, s16 soundnum, s32 arg7, f32 *distanceptr);
 s32 psGetRandomSparkSound(void);
 s32 psGetDuration60(s32 channelnum);
+#ifndef PLATFORM_N64
+s32 psStopRepeatingForProp(struct prop *prop); // MOD: cutscene lift sound
+#endif
 
 #endif

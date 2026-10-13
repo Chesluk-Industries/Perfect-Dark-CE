@@ -4,6 +4,9 @@
 #include "lib/memp.h"
 #include "data.h"
 #include "types.h"
+#ifndef PLATFORM_N64
+#include "video.h" // MOD: Video.UnlimitedDecals
+#endif
 
 u16 *g_WallhitCountsPerRoom;
 s32 g_WallhitsMax;
@@ -36,7 +39,11 @@ void wallhitReset(void)
 	if (IS4MB()) {
 		type = 0;
 	} else if ((g_Vars.coopplayernum >= 0 || g_Vars.antiplayernum >= 0) && PLAYERCOUNT() == 2) {
+#ifndef PLATFORM_N64
+		type = 2; // MOD: co-op effects - as many bullet holes and blood marks as solo
+#else
 		type = 1;
+#endif
 	} else if (PLAYERCOUNT() >= 2) {
 		type = 0;
 	}
@@ -80,6 +87,21 @@ void wallhitReset(void)
 		g_WallhitTargetBloodRatio = 0.5f;
 		break;
 	}
+
+#ifndef PLATFORM_N64
+	// MOD: Video.UnlimitedDecals - (practically) no limit on bullet holes,
+	// blood and scorch marks: a much bigger pool, recycled as before when full
+	if (g_UnlimitedDecals && type != 0) {
+		g_WallhitsMax = 8192;
+		g_MinPropWallhits = 1000;
+		g_MaxPropWallhits = 4096;
+		g_MinBgWallhitsPerRoom = 1000;
+		g_MaxBgWallhitsPerRoom = 8192;
+		var8009cc6c = 4096;
+		g_WallhitsCriticalSpareLimit = 25;
+		g_WallhitsGoalSpareLimit = 40;
+	}
+#endif
 
 	g_WallhitCountsPerRoom = NULL;
 	g_WallhitsNumSettled = 0;

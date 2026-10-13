@@ -60,6 +60,14 @@ static char logPath[2048];
 static s32 sysArgc;
 static const char **sysArgv;
 
+// MOD: crash logs: the last log lines are kept in memory for crash logs
+#define LOG_RING_LINES 200
+#define LOG_RING_LEN 240
+static char logRing[LOG_RING_LINES][LOG_RING_LEN];
+static u32 logRingNext = 0;
+static s32 crashLogWritten = 0;
+static void (*crashInfoCallback)(char *buf, s32 len) = NULL;
+
 static inline void sysLogSetPath(const char *fname)
 {
 	// figure out where the log is and clear it
@@ -175,6 +183,12 @@ void sysLogPrintf(s32 level, const char *fmt, ...)
 	vsnprintf(logmsg, sizeof(logmsg), fmt, ap);
 	va_end(ap);
 
+	{
+		char *line = logRing[logRingNext % LOG_RING_LINES];
+		snprintf(line, LOG_RING_LEN, "[%8.3f] %s%s", (f64)sysGetMicroseconds() / 1000000.0, prefix[level], logmsg);
+		logRingNext++;
+	}
+
 	if (logPath[0]) {
 		FILE *f = fopen(logPath, "ab");
 		if (f) {
@@ -209,9 +223,118 @@ void sysFatalError(const char *fmt, ...)
 	fflush(stdout);
 	fflush(stderr);
 
+	// MOD: crash logs (crashes write theirs before getting here)
+	if (!crashLogWritten) {
+		char text[2200];
+		snprintf(text, sizeof(text), "Fatal error:\n%s\n", errmsg);
+		sysWriteCrashLog(text);
+	}
+
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal error", errmsg, NULL);
 
 	exit(1);
+}
+
+// MOD: crash logs
+void sysSetCrashInfoCallback(void (*fn)(char *buf, s32 len))
+{
+	crashInfoCallback = fn;
+}
+
+static void sysWriteCrashLogFile(const char *fname, const char *text, const char *info, const char *timestr)
+{
+	char path[2048];
+	FILE *f = NULL;
+	u32 i;
+	u32 first;
+
+	// same folder as pd.log: the working dir, or the home dir
+	snprintf(path, sizeof(path), "./%s", fname);
+	f = fopen(path, "wb");
+
+	if (!f) {
+		sysGetHomePath(path, sizeof(path) - 1);
+		strncat(path, "/", sizeof(path) - strlen(path) - 1);
+		strncat(path, fname, sizeof(path) - strlen(path) - 1);
+		f = fopen(path, "wb");
+	}
+
+	if (!f) {
+		return;
+	}
+
+	fprintf(f, "Perfect Dark crash log\n");
+#ifdef VERSION_HASH
+	fprintf(f, "version: " VERSION_BRANCH " " VERSION_HASH " (" VERSION_TARGET ")\n");
+#endif
+	fprintf(f, "time: %s, %.1f s after startup\n\n", timestr, (f64)sysGetMicroseconds() / 1000000.0);
+	fprintf(f, "%s\n", text);
+
+	if (info && info[0]) {
+		fprintf(f, "\n%s\n", info);
+	}
+
+	fprintf(f, "\nLAST LOG LINES:\n");
+	first = logRingNext > LOG_RING_LINES ? logRingNext - LOG_RING_LINES : 0;
+
+	for (i = first; i < logRingNext; i++) {
+		fprintf(f, "%s\n", logRing[i % LOG_RING_LINES]);
+	}
+
+	fclose(f);
+	sysLogPrintf(LOG_ERROR, "crash log written to %s", path);
+}
+
+void sysWriteCrashLogEarly(const char *text)
+{
+	char timestr[64];
+	const time_t curtime = time(NULL);
+	struct tm *tm = localtime(&curtime);
+
+	if (crashLogWritten) {
+		return;
+	}
+
+	if (!tm || !strftime(timestr, sizeof(timestr), "%d %b %Y %H:%M:%S", tm)) {
+		strcpy(timestr, "unknown");
+	}
+
+	sysWriteCrashLogFile(CRASHLOG_FNAME, text,
+		"(This is the short log written first. If nothing else is here, the crash handler\n"
+		"itself failed while walking the stack or collecting the extra info.)", timestr);
+}
+
+void sysWriteCrashLog(const char *text)
+{
+	static char info[8192];
+	char timestr[64];
+	char stamp[64];
+	char fname[128];
+	const time_t curtime = time(NULL);
+	struct tm *tm = localtime(&curtime);
+
+	if (crashLogWritten) {
+		return;
+	}
+
+	crashLogWritten = 1;
+	info[0] = '\0';
+
+	if (crashInfoCallback) {
+		crashInfoCallback(info, sizeof(info));
+	}
+
+	if (tm) {
+		strftime(timestr, sizeof(timestr), "%d %b %Y %H:%M:%S", tm);
+		strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", tm);
+	} else {
+		strcpy(timestr, "unknown");
+		strcpy(stamp, "unknown");
+	}
+
+	snprintf(fname, sizeof(fname), "pd.crash-%s.log", stamp);
+	sysWriteCrashLogFile(CRASHLOG_FNAME, text, info, timestr);
+	sysWriteCrashLogFile(fname, text, info, timestr);
 }
 
 void sysGetExecutablePath(char *outPath, const u32 outLen)

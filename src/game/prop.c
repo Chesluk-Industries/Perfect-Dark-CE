@@ -7,6 +7,9 @@
 #include "game/dlights.h"
 #include "game/chr.h"
 #include "game/prop.h"
+#ifndef PLATFORM_N64
+#include "game/lv.h" // MOD: sparks - LV_STEP240
+#endif
 #include "game/propsnd.h"
 #include "game/objectives.h"
 #include "game/floor.h"
@@ -855,7 +858,12 @@ struct prop *shotCalculateHits(s32 handnum, bool isshooting, struct coord *gunpo
 					explosionCreateSimple(NULL, &sp694.pos, rooms2, EXPLOSIONTYPE_PHOENIX, g_Vars.currentplayernum);
 				} else {
 					if (!chrIsUsingPaintball(g_Vars.currentplayer->prop->chr)) {
+#ifndef PLATFORM_N64
+						// MOD: co-op effects - the solo bullet impacts in co-op/counter-op too
+						if (PLAYERCOUNT() >= 2 && g_Vars.normmplayerisrunning) {
+#else
 						if (PLAYERCOUNT() >= 2) {
+#endif
 							if ((rngRandom() % 8) == 0) {
 								smokeCreateSimple(&sp694.pos, rooms2, SMOKETYPE_BULLETIMPACT);
 							}
@@ -994,6 +1002,8 @@ bool shotTestLos(struct coord *gunpos2d, struct coord *gundir2d, struct coord *g
 	struct prop *prop;
 	s16 texturenum;
 	u32 surfacetype;
+	s16 grateddoor; // MOD: grated door glares - by joshuarwood (perfect_dark PR #735)
+	f32 maxdistance;
 
 	shotdata.gunpos3d.x = gunpos3d->x;
 	shotdata.gunpos3d.y = gunpos3d->y;
@@ -1056,7 +1066,9 @@ bool shotTestLos(struct coord *gunpos2d, struct coord *gundir2d, struct coord *g
 	delta.x = endpos3d->x - gunpos3d->x;
 	delta.y = endpos3d->y - gunpos3d->y;
 	delta.z = endpos3d->z - gunpos3d->z;
-	shotdata.distance = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+	maxdistance = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+
+	shotdata.distance = maxdistance;
 
 	// and check props
 	propptr = g_Vars.endonscreenprops - 1;
@@ -1074,12 +1086,15 @@ bool shotTestLos(struct coord *gunpos2d, struct coord *gundir2d, struct coord *g
 			if (shotdata.hits[0].prop) {
 				texturenum = (prop->type == PROPTYPE_CHR || prop->type == PROPTYPE_PLAYER) ? -1 : shotdata.hits[0].hitthing.texturenum;
 				surfacetype = (texturenum >= 0 && texturenum < NUM_TEXTURES) ? g_Textures[texturenum].surfacetype : SURFACETYPE_DEFAULT;
+				// MOD: grated door glares - by joshuarwood (perfect_dark PR #735)
+				grateddoor = (shotdata.hits[0].model->obj->modelnum == MODEL_DD_WINDDOOR) && (surfacetype == SURFACETYPE_DEFAULT);
 				// ignore some glass parts and shields
 				if (shotdata.hits[0].slowsbullet && texturenum != 10000 &&
-				    surfacetype != SURFACETYPE_GLASS && surfacetype != SURFACETYPE_GLASSXLU) {
+				    surfacetype != SURFACETYPE_GLASS && surfacetype != SURFACETYPE_GLASSXLU && !grateddoor) {
 					return false;
 				}
 				shotdata.hits[0].prop = NULL;
+				shotdata.distance = maxdistance;
 			}
 		}
 		propptr--;
@@ -2363,6 +2378,10 @@ void propsTickPadEffects(void)
 	RoomNum rooms[2];
 	RoomNum rooms2[2];
 	s32 type;
+#ifndef PLATFORM_N64
+	// MOD: sparks - sparking pads roll their dice once per 60th, not per tick
+	bool sparkroll = LV_STEP240(4);
+#endif
 
 	if (g_LastPadEffectIndex >= 0) {
 		for (i = 0; i <= g_LastPadEffectIndex; i++) {
@@ -2374,6 +2393,12 @@ void propsTickPadEffects(void)
 				switch (effect->effect) {
 				case PADEFFECT_SPARKS:
 				case PADEFFECT_SPARKS2:
+#ifndef PLATFORM_N64
+					if (!sparkroll) {
+						break;
+					}
+#endif
+
 					rooms[0] = pad.room;
 					rooms[1] = -1;
 

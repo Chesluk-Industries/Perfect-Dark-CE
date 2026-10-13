@@ -12,6 +12,9 @@
 #include "data.h"
 #include "types.h"
 #include "platform.h"
+#ifndef PLATFORM_N64
+#include "video.h" // MOD: Video.UnlimitedDecals
+#endif
 
 /**
  * This file handles memory usage for graphics related tasks.
@@ -111,15 +114,31 @@ void gfxReset(void)
 		g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1] = strtol(argFindByPrefix(1, "-mvtx"), NULL, 0) * 1024;
 	}
 
-	// %d Players : Allocating %d bytes for master dl's\n
-	g_GfxBuffers[0] = mempAlloc(g_GfxSizesByPlayerCount[PLAYERCOUNT() - 1] * NUM_GFXTASKS, MEMPOOL_STAGE);
-	g_GfxBuffers[1] = g_GfxBuffers[0] + g_GfxSizesByPlayerCount[PLAYERCOUNT() - 1];
-	g_GfxBuffers[2] = g_GfxBuffers[1] + g_GfxSizesByPlayerCount[PLAYERCOUNT() - 1];
+	{
+		// MOD: bigger per-frame display list and vertex buffers for
+		// unlimited decals and ragdoll corpses
+		u32 gfxsize = g_GfxSizesByPlayerCount[PLAYERCOUNT() - 1];
+		u32 vtxsize = g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1];
 
-	// Allocating %d bytes for mtxvtx space\n
-	g_VtxBuffers[0] = mempAlloc(g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1] * NUM_GFXTASKS, MEMPOOL_STAGE);
-	g_VtxBuffers[1] = g_VtxBuffers[0] + g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1];
-	g_VtxBuffers[2] = g_VtxBuffers[1] + g_VtxSizesByPlayerCount[PLAYERCOUNT() - 1];
+
+#ifndef PLATFORM_N64
+		if (g_UnlimitedDecals) {
+			gfxsize += DECALS_EXTRA_GFX;
+			vtxsize += DECALS_EXTRA_VTX;
+		}
+#endif
+
+
+		// %d Players : Allocating %d bytes for master dl's\n
+		g_GfxBuffers[0] = mempAlloc(gfxsize * NUM_GFXTASKS, MEMPOOL_STAGE);
+		g_GfxBuffers[1] = g_GfxBuffers[0] + gfxsize;
+		g_GfxBuffers[2] = g_GfxBuffers[1] + gfxsize;
+
+		// Allocating %d bytes for mtxvtx space\n
+		g_VtxBuffers[0] = mempAlloc(vtxsize * NUM_GFXTASKS, MEMPOOL_STAGE);
+		g_VtxBuffers[1] = g_VtxBuffers[0] + vtxsize;
+		g_VtxBuffers[2] = g_VtxBuffers[1] + vtxsize;
+	}
 
 	g_GfxActiveBufferIndex = 0;
 	g_GfxRequestedDisplayList = false;

@@ -43,6 +43,40 @@
 #include "input.h"
 #include "video.h"
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: button hold timers - the time B is held (switching a gun's function)
+ * and the aim button is held (a tap crouches) count 60ths, not ticks: a
+ * hold's first tick counts as one, then one per 60th held.
+ */
+static s32 g_BmoveHoldAcc240[MAX_PLAYERS][2];
+
+static s32 bmoveHoldTimerInc(s32 value, s32 which)
+{
+	s32 *acc = &g_BmoveHoldAcc240[g_Vars.currentplayernum][which];
+
+	if (value <= 0) {
+		*acc = 0;
+		return value + 1;
+	}
+
+	*acc += g_Vars.lvupdate240;
+
+	while (*acc >= 4) {
+		*acc -= 4;
+		value++;
+	}
+
+	return value;
+}
+
+#define USEDOWNTIME_INC() g_Vars.currentplayer->usedowntime = bmoveHoldTimerInc(g_Vars.currentplayer->usedowntime, 0)
+#define AIMTAPTIME_INC() g_Vars.currentplayer->aimtaptime = bmoveHoldTimerInc(g_Vars.currentplayer->aimtaptime, 1)
+#else
+#define USEDOWNTIME_INC() g_Vars.currentplayer->usedowntime++
+#define AIMTAPTIME_INC() g_Vars.currentplayer->aimtaptime++
+#endif
+
 static void bgunProcessQuickDetonate(struct movedata *data, u32 c1buttons, u32 c1buttonsthisframe, u32 buttons1, u32 buttons2) {
 	if ((((c1buttons & (buttons1)) && (c1buttonsthisframe & (buttons2)))
 			|| ((c1buttons & (buttons2)) && (c1buttonsthisframe & (buttons1))))
@@ -1085,10 +1119,10 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 											} else if (result == USETIMER_REPEAT) {
 												g_Vars.currentplayer->usedowntime = -2;
 											} else {
-												g_Vars.currentplayer->usedowntime++;
+												USEDOWNTIME_INC();
 											}
 										} else {
-											g_Vars.currentplayer->usedowntime++;
+											USEDOWNTIME_INC();
 										}
 									}
 								} else if (g_Vars.currentplayer->usedowntime >= -2) {
@@ -1157,7 +1191,7 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 							if (optionsGetAimControl(g_Vars.currentplayerstats->mpindex) == AIMCONTROL_HOLD) {
 								if (aimonhist[i]) {
 									if (g_Vars.currentplayer->aimtaptime > -1) {
-										g_Vars.currentplayer->aimtaptime++;
+										AIMTAPTIME_INC();
 									}
 								} else {
 									if (g_Vars.currentplayer->aimtaptime > 0
@@ -1553,10 +1587,10 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 											} else if (result == USETIMER_REPEAT) {
 												g_Vars.currentplayer->usedowntime = -2;
 											} else {
-												g_Vars.currentplayer->usedowntime++;
+												USEDOWNTIME_INC();
 											}
 										} else {
-											g_Vars.currentplayer->usedowntime++;
+											USEDOWNTIME_INC();
 										}
 									}
 								} else {
@@ -1747,7 +1781,7 @@ void bmoveProcessInput(bool allowc1x, bool allowc1y, bool allowc1buttons, bool i
 							if (optionsGetAimControl(g_Vars.currentplayerstats->mpindex) == AIMCONTROL_HOLD) {
 								if (aimonhist[i]) {
 									if (g_Vars.currentplayer->aimtaptime >= 0) {
-										g_Vars.currentplayer->aimtaptime++;
+										AIMTAPTIME_INC();
 									}
 								} else {
 									// Released aim
@@ -2327,13 +2361,21 @@ void bmove0f0cba88(f32 *a, f32 *b, struct coord *c, f32 mult1, f32 mult2)
 	}
 }
 
+#ifndef PLATFORM_N64
+// MOD: momentum decay - the momentum kept after leaving a hoverbike loses 10%
+// per 60th, not per tick
+#define MOVEINIT_DECAY __builtin_powf(0.9f, g_Vars.lvupdate60freal)
+#else
+#define MOVEINIT_DECAY 0.9f
+#endif
+
 void bmoveUpdateMoveInitSpeed(struct coord *newpos)
 {
 	if (g_Vars.currentplayer->moveinitspeed.x != 0) {
 		if (g_Vars.currentplayer->moveinitspeed.x < 0.001f && g_Vars.currentplayer->moveinitspeed.x > -0.001f) {
 			g_Vars.currentplayer->moveinitspeed.x = 0;
 		} else {
-			g_Vars.currentplayer->moveinitspeed.x *= 0.9f;
+			g_Vars.currentplayer->moveinitspeed.x *= MOVEINIT_DECAY;
 			newpos->x += g_Vars.currentplayer->moveinitspeed.x * g_Vars.lvupdate60freal;
 		}
 	}
@@ -2342,7 +2384,7 @@ void bmoveUpdateMoveInitSpeed(struct coord *newpos)
 		if (g_Vars.currentplayer->moveinitspeed.z < 0.001f && g_Vars.currentplayer->moveinitspeed.z > -0.001f) {
 			g_Vars.currentplayer->moveinitspeed.z = 0;
 		} else {
-			g_Vars.currentplayer->moveinitspeed.z *= 0.9f;
+			g_Vars.currentplayer->moveinitspeed.z *= MOVEINIT_DECAY;
 			newpos->z += g_Vars.currentplayer->moveinitspeed.z * g_Vars.lvupdate60freal;
 		}
 	}
@@ -2456,7 +2498,12 @@ void bmove0f0cc19c(struct coord *arg)
 	g_Vars.currentplayer->bond2.unk10.z = arg->z;
 
 	if (g_Vars.currentplayer->isdead && g_Vars.currentplayer->bondleandown > 0) {
+#ifndef PLATFORM_N64
+		// MOD: death lean - recovered by a set amount per tick; now per 60th
+		g_Vars.currentplayer->bondleandown -= 0.25f * g_Vars.lvupdate60freal;
+#else
 		g_Vars.currentplayer->bondleandown -= 0.25f;
+#endif
 
 		if (g_Vars.currentplayer->bondleandown < 0) {
 			g_Vars.currentplayer->bondleandown = 0;

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <SDL.h>
 #include <PR/ultratypes.h>
 #include "system.h"
@@ -28,6 +29,7 @@
 // this means that you generally won't get any symbol names in the main executable
 
 static LPTOP_LEVEL_EXCEPTION_FILTER prevExFilter;
+static DWORD crashMainThreadId;
 
 static void *crashGetModuleBase(const void *addr)
 {
@@ -36,9 +38,33 @@ static void *crashGetModuleBase(const void *addr)
 	return (void *)h;
 }
 
+// MOD: crash logs: the image base the exe was linked at, so addresses can be
+// turned into the ones addr2line expects even with ASLR
+static uintptr_t crashGetPreferredBase(void *modbase)
+{
+	const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)modbase;
+	const IMAGE_NT_HEADERS *nt;
+
+	if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE) {
+		return (uintptr_t)modbase;
+	}
+
+	nt = (const IMAGE_NT_HEADERS *)((const u8 *)modbase + dos->e_lfanew);
+
+	if (nt->Signature != IMAGE_NT_SIGNATURE) {
+		return (uintptr_t)modbase;
+	}
+
+	return (uintptr_t)nt->OptionalHeader.ImageBase;
+}
+
 static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 {
 	CONTEXT context = *exinfo->ContextRecord;
+	void *mainbase = crashGetModuleBase(crashInit);
+	const uintptr_t mainpref = crashGetPreferredBase(mainbase);
+	uintptr_t mainaddrs[CRASH_MAX_FRAMES + 1];
+	s32 nummainaddrs = 0;
 	HANDLE process = GetCurrentProcess();
 	HANDLE thread = GetCurrentThread();
 
@@ -75,14 +101,39 @@ static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 	IMAGEHLP_LINE64 line;
 	DWORD msglen = 0;
 
-	CRASH_MSG("EXCEPTION: 0x%08lx\n", exinfo->ExceptionRecord->ExceptionCode);
+	CRASH_MSG("EXCEPTION: 0x%08lx", exinfo->ExceptionRecord->ExceptionCode);
+	switch (exinfo->ExceptionRecord->ExceptionCode) {
+	case EXCEPTION_ACCESS_VIOLATION:
+		CRASH_MSG(" (access violation)");
+		if (exinfo->ExceptionRecord->NumberParameters >= 2) {
+			const ULONG_PTR kind = exinfo->ExceptionRecord->ExceptionInformation[0];
+			CRASH_MSG(": %s address %p", kind == 0 ? "reading" : (kind == 1 ? "writing" : "executing"),
+				(void *)exinfo->ExceptionRecord->ExceptionInformation[1]);
+		}
+		break;
+	case EXCEPTION_STACK_OVERFLOW: CRASH_MSG(" (stack overflow)"); break;
+	case EXCEPTION_INT_DIVIDE_BY_ZERO: CRASH_MSG(" (integer divide by zero)"); break;
+	case EXCEPTION_ILLEGAL_INSTRUCTION: CRASH_MSG(" (illegal instruction)"); break;
+	case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: CRASH_MSG(" (array bounds exceeded)"); break;
+	case EXCEPTION_IN_PAGE_ERROR: CRASH_MSG(" (in-page error)"); break;
+	case 0xE0000001: CRASH_MSG(" (abort)"); break;
+	default: break;
+	}
+	CRASH_MSG("\n");
 	CRASH_MSG("PC: %p", exinfo->ExceptionRecord->ExceptionAddress);
 	if (SymGetLineFromAddr64(process, (uintptr_t)exinfo->ExceptionRecord->ExceptionAddress, &disp, &line)) {
 		CRASH_MSG(": %s:%lu+%lu", line.FileName, line.LineNumber, disp);
 	}
 	CRASH_MSG("\nMODULE: [%p]\n", crashGetModuleBase(exinfo->ExceptionRecord->ExceptionAddress));
-	CRASH_MSG("MAIN MODULE: [%p]\n", crashGetModuleBase(crashInit));
-	CRASH_MSG("\nBACKTRACE:\n");
+	CRASH_MSG("MAIN MODULE: [%p] (linked at %p)\n", mainbase, (void *)mainpref);
+#ifdef PLATFORM_X86_64
+	CRASH_MSG("\nREGISTERS:\n");
+	CRASH_MSG("RAX=%016llx RBX=%016llx RCX=%016llx RDX=%016llx\n", context.Rax, context.Rbx, context.Rcx, context.Rdx);
+	CRASH_MSG("RSI=%016llx RDI=%016llx RBP=%016llx RSP=%016llx\n", context.Rsi, context.Rdi, context.Rbp, context.Rsp);
+	CRASH_MSG("R8 =%016llx R9 =%016llx R10=%016llx R11=%016llx\n", context.R8, context.R9, context.R10, context.R11);
+	CRASH_MSG("R12=%016llx R13=%016llx R14=%016llx R15=%016llx\n", context.R12, context.R13, context.R14, context.R15);
+#endif
+	CRASH_MSG("\nBACKTRACE (module-relative offsets in brackets):\n");
 
 	char symbuf[sizeof(SYMBOL_INFO) + CRASH_MAX_SYM * sizeof(TCHAR)];
 	PSYMBOL_INFO sym = (PSYMBOL_INFO)symbuf;
@@ -98,12 +149,27 @@ static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 
 		CRASH_MSG("#%02d: %p", i, (void *)(uintptr_t)stackframe.AddrPC.Offset);
 
-		if (SymFromAddr(process, stackframe.AddrPC.Offset, &disp64, sym)) {
-			CRASH_MSG(": %s+%llu", sym->Name, disp64);
-		} else if (process, stackframe.AddrPC.Offset) {
+		{
 			const uintptr_t modbase = (uintptr_t)crashGetModuleBase((void *)(uintptr_t)stackframe.AddrPC.Offset);
 			const uintptr_t modofs = (uintptr_t)stackframe.AddrPC.Offset - modbase;
-			CRASH_MSG(": [%p]+%p", (void *)modbase, (void *)modofs);
+			char modname[MAX_PATH] = { 0 };
+			const char *shortname = "?";
+
+			if (modbase && GetModuleFileNameA((HMODULE)modbase, modname, sizeof(modname) - 1)) {
+				const char *slash = strrchr(modname, '\\');
+				shortname = slash ? slash + 1 : modname;
+			}
+
+			CRASH_MSG(" [%s+0x%llx]", shortname, (unsigned long long)modofs);
+
+			// return addresses point after the call: -1 lands on the call itself
+			if (modbase && modbase == (uintptr_t)mainbase && nummainaddrs < CRASH_MAX_FRAMES) {
+				mainaddrs[nummainaddrs++] = mainpref + modofs - (i > 0 ? 1 : 0);
+			}
+		}
+
+		if (SymFromAddr(process, stackframe.AddrPC.Offset, &disp64, sym)) {
+			CRASH_MSG(": %s+%llu", sym->Name, disp64);
 		}
 
 		if(SymGetLineFromAddr64(process, stackframe.AddrPC.Offset, &disp, &line)) {
@@ -119,12 +185,34 @@ static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 		CRASH_MSG("...\n");
 	}
 
+	// gcc builds have no PDB, so the names come from addr2line (MSYS2) on
+	// this exact exe, which keeps its debug info (RelWithDebInfo)
+	if (nummainaddrs > 0) {
+		CRASH_MSG("\nTO GET FUNCTION NAMES AND LINES, run in the MSYS2 MINGW64 shell next to this exe:\naddr2line -f -C -i -p -e pd.x86_64.exe");
+		for (s32 j = 0; j < nummainaddrs; j++) {
+			CRASH_MSG(" 0x%llx", (unsigned long long)mainaddrs[j]);
+		}
+		CRASH_MSG("\n");
+	}
+
 	SymCleanup(process);
 }
 
+static char crashMsgBuf[CRASH_MAX_MSG + 1];
+
+
 static long __stdcall crashHandler(PEXCEPTION_POINTERS exinfo)
 {
-	char msg[CRASH_MAX_MSG + 1] = { 0 };
+	// static: there may be little stack left (stack overflow)
+	char *msg = crashMsgBuf;
+	static s32 inHandler = 0;
+
+	if (inHandler) {
+		return EXCEPTION_CONTINUE_SEARCH; // crashed while handling a crash
+	}
+
+	inHandler = 1;
+	memset(crashMsgBuf, 0, sizeof(crashMsgBuf));
 
 	if (IsDebuggerPresent()) {
 		if (prevExFilter) {
@@ -138,20 +226,61 @@ static long __stdcall crashHandler(PEXCEPTION_POINTERS exinfo)
 	fflush(stderr);
 	fflush(stdout);
 
-	crashStackTrace(msg, exinfo);
+	// MOD: crash logs: a short log first, with nothing that can fail
+	{
+		static char early[1024];
+		void *pc = exinfo->ExceptionRecord->ExceptionAddress;
+		void *modbase = crashGetModuleBase(pc);
+		void *mainbase = crashGetModuleBase(crashInit);
+		char modname[MAX_PATH] = { 0 };
+		const char *shortname = "?";
 
-	// open log file for the crash dump if one hasn't been opened yet
-	if (!sysLogIsOpen()) {
-		FILE *f = fopen(CRASH_LOG_FNAME, "wb");
-		if (f) {
-			fprintf(f, "Crash!\n\n%s", msg);
-			fclose(f);
+		if (modbase && GetModuleFileNameA((HMODULE)modbase, modname, sizeof(modname) - 1)) {
+			const char *slash = strrchr(modname, '\\');
+			shortname = slash ? slash + 1 : modname;
 		}
+
+		snprintf(early, sizeof(early),
+			"Crashed: PC=%p [%s+0x%llx] CODE=0x%08lx, thread %lu (%s)\n"
+			"addr2line -f -C -i -p -e pd.x86_64.exe 0x%llx\n",
+			pc, shortname, (unsigned long long)((uintptr_t)pc - (uintptr_t)modbase),
+			exinfo->ExceptionRecord->ExceptionCode, GetCurrentThreadId(),
+			GetCurrentThreadId() == crashMainThreadId ? "main thread" : "not the main thread",
+			(unsigned long long)(modbase == mainbase && modbase
+				? crashGetPreferredBase(mainbase) + ((uintptr_t)pc - (uintptr_t)modbase) : 0));
+		sysWriteCrashLogEarly(early);
 	}
 
-	sysFatalError("Crash!\n\n%s", msg);
+	crashStackTrace(msg, exinfo);
+
+	// MOD: crash logs: always written (pd.crash.log + a dated copy), with or without --log
+	sysWriteCrashLog(msg);
+
+	sysFatalError("Crash! A crash log was saved as pd.crash.log.\n\n%s", msg);
 
 	return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+// abort() (failed asserts, C++ terminate) doesn't go through the exception filter
+static void crashAbortHandler(int sig)
+{
+	CONTEXT context;
+	EXCEPTION_RECORD record;
+	EXCEPTION_POINTERS pointers;
+
+	signal(SIGABRT, SIG_DFL);
+	memset(&context, 0, sizeof(context));
+	memset(&record, 0, sizeof(record));
+	RtlCaptureContext(&context);
+	record.ExceptionCode = 0xE0000001;
+#ifdef PLATFORM_X86_64
+	record.ExceptionAddress = (void *)(uintptr_t)context.Rip;
+#elif defined(PLATFORM_X86)
+	record.ExceptionAddress = (void *)(uintptr_t)context.Eip;
+#endif
+	pointers.ExceptionRecord = &record;
+	pointers.ContextRecord = &context;
+	crashHandler(&pointers);
 }
 
 #elif defined(PLATFORM_LINUX)
@@ -295,6 +424,9 @@ static void crashHandler(s32 sig, siginfo_t *siginfo, void *ctx)
 
 	crashStackTrace(msg, sig, pc);
 
+	// MOD: crash logs
+	sysWriteCrashLog(msg);
+
 	sysFatalError("Crash!\n\n%s", msg);
 }
 
@@ -308,7 +440,19 @@ void crashInit(void)
 {
 #ifdef PLATFORM_WIN32
 	SetErrorMode(SEM_FAILCRITICALERRORS);
+	crashMainThreadId = GetCurrentThreadId();
 	prevExFilter = SetUnhandledExceptionFilter(crashHandler);
+	// MOD: crash logs: keep some stack for the handler after a stack overflow,
+	// and catch abort() too
+	{
+		typedef BOOL (WINAPI *STACKGUARANTEEFN)(PULONG);
+		STACKGUARANTEEFN fn = (STACKGUARANTEEFN)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetThreadStackGuarantee");
+		ULONG guarantee = 64 * 1024;
+		if (fn) {
+			fn(&guarantee);
+		}
+	}
+	signal(SIGABRT, crashAbortHandler);
 	g_CrashEnabled = 1;
 #elif defined(PLATFORM_LINUX)
 	struct sigaction sigact = { 0 };
@@ -319,6 +463,23 @@ void crashInit(void)
 	sigaction(SIGBUS,  &sigact, &prevSigAction);
 	sigaction(SIGILL,  &sigact, &prevSigAction);
 	g_CrashEnabled = 1;
+#endif
+}
+
+void crashReinstall(void)
+{
+#ifdef PLATFORM_WIN32
+	LPTOP_LEVEL_EXCEPTION_FILTER cur;
+
+	if (!g_CrashEnabled) {
+		return;
+	}
+
+	cur = SetUnhandledExceptionFilter(crashHandler);
+
+	if (cur != crashHandler) {
+		sysLogPrintf(LOG_WARNING, "crash handler had been replaced (by %p), put back", (void *)cur);
+	}
 #endif
 }
 

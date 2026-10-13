@@ -13,7 +13,13 @@ void vtxstoreReset(void)
 	s32 val;
 
 	for (i = 0; i < ARRAYCOUNT(g_VtxstoreTypes); i++) {
+#ifndef PLATFORM_N64
+		// MOD: co-op effects - co-op/counter-op get the solo budgets: corpses
+		// don't vanish early
+		if (PLAYERCOUNT() >= 2 && g_Vars.normmplayerisrunning) {
+#else
 		if (PLAYERCOUNT() >= 2) {
+#endif
 			val = g_VtxstoreTypes[i].valifmp;
 			num = g_VtxstoreTypes[i].numifmp;
 		} else if (g_Vars.stagenum >= STAGE_TITLE) {

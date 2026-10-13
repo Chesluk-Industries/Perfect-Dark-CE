@@ -179,6 +179,10 @@ void propsReset(void)
 		g_Lifts[i] = NULL;
 	}
 
+#ifndef PLATFORM_N64
+	liftForgetSilentStarts(); // MOD: cutscene lift sound
+#endif
+
 	g_MaxWeaponSlots = 50;
 	g_MaxHatSlots = 10;
 	g_MaxAmmoCrates = 20;
@@ -1501,6 +1505,11 @@ void setupCreateProps(s32 stagenum)
 
 	withhovercars = !(stagenum == STAGE_EXTRACTION || stagenum == STAGE_DEFECTION)
 		|| !(g_Vars.coopplayernum >= 0 || g_Vars.antiplayernum >= 0);
+
+#ifndef PLATFORM_N64
+	// MOD: co-op effects - the flying cars in Defection and Extraction in co-op/counter-op too
+	withhovercars = true;
+#endif
 
 	escstepx = 0;
 	escstepy = 0;

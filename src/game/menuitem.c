@@ -3474,11 +3474,20 @@ bool menuitemMarqueeTick(struct menuitem *item, union menuitemdata *data)
 
 	textMeasure(&textheight, &textwidth, text, font1, font2, 0);
 	limit = data->marquee.viewwidth + textwidth;
+#ifndef PLATFORM_N64
+	// MOD: marquee speed - a pixel per 60th, not at least one per frame
+	increment = g_Vars.thisframestart240 / 4 - g_Vars.prevframestart240 / 4;
+
+	if (increment < 0) {
+		increment = 0;
+	}
+#else
 	increment = g_Vars.diffframe60 / 2;
 
 	if (increment <= 0) {
 		increment = 1;
 	}
+#endif
 
 	data->marquee.totalmoved += increment;
 

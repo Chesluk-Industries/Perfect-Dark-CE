@@ -54,7 +54,7 @@ static f32 vidGlareBrightness = 1.f;
 static f32 vidOverexposureScale = 1.f;
 
 static s32 texFilter = FILTER_LINEAR;
-static s32 texFilter2D = true;
+static s32 texFilter2D = false; // MOD: defaults - GUI texture filtering off
 static s32 texDetail = false;
 static s32 texMipmapFilter = MIPMAP_LINEAR;
 static u32 texAnisotropicFilter = 4;
@@ -563,8 +563,17 @@ void videoShutdown(void)
 	free(vidModes);
 }
 
+s32 g_UnlimitedDecals = 1; // MOD: no limit on bullet holes/blood (wallhitreset.c)
+// MOD: shiny alpha fix (murkantor, perfect_dark_netplay) - how much of their
+// alpha opaque shiny room surfaces keep in the dark: 255 = solid, 0 = vanilla fade
+s32 g_RoomShinyAlphaFloor = 255;
+s32 g_DecalClamp = 1; // MOD: decal edge clamp - decals stop at the surface's edges like on N64 (fast3d gfx_opengl.cpp)
+
 PD_CONSTRUCTOR static void videoConfigInit(void)
 {
+	configRegisterInt("Video.UnlimitedDecals", &g_UnlimitedDecals, 0, 1);
+	configRegisterInt("Video.DecalClamp", &g_DecalClamp, 0, 1); // MOD: decal edge clamp
+	configRegisterInt("Video.ShinyAlphaFloor", &g_RoomShinyAlphaFloor, 0, 255); // MOD: shiny alpha fix
 	configRegisterInt("Video.DefaultFullscreen", &vidFullscreen, 0, 1);
 	configRegisterInt("Video.DefaultMaximize", &vidMaximize, 0, 1);
 	configRegisterInt("Video.DefaultWidth", &vidWidth, 0, 32767);

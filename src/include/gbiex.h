@@ -197,6 +197,7 @@
 #define G_RDPFLUSH_EXT               0x43
 #define G_CLEAR_DEPTH_EXT            0x44
 #define G_SETSUBPIXELOFFSET_EXT      0x45
+#define G_DECALCLAMP_EXT             0x49 // MOD: decal edge clamp - only for wallhits (bullet holes, blood, scorch marks)
 
 /* G_EXTRAGEOMETRYMODE flags */
 
@@ -311,6 +312,17 @@
 #define gDPFlushEXT(pkt) gDPNoParam(pkt, G_RDPFLUSH_EXT)
 
 #define gDPClearDepthEXT(pkt) gDPNoParam(pkt, G_CLEAR_DEPTH_EXT)
+
+// MOD: decal edge clamp - the decals drawn between on and off are clamped
+// to their surface's edges (Video.DecalClamp); the level's own decals (baked
+// shadows) aren't
+#define gSPDecalClampEXT(pkt, on)                                            \
+{                                                                            \
+    Gfx *_g = (Gfx*)(pkt);                                                   \
+                                                                             \
+    _g->words.w0 = _SHIFTL(G_DECALCLAMP_EXT, 24, 8) | ((on) ? 1 : 0);        \
+    _g->words.w1 = 0;                                                        \
+}
 
 #undef gDPFillRectangleScaled
 #define gDPFillRectangleScaled(pkt, x1, y1, x2, y2) gDPFillRectangleEXT(pkt, (x1) * g_ScaleX, y1, (x2) * g_ScaleX, y2)

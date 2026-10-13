@@ -82,4 +82,16 @@ void videoFreeCachedTextures(const void *start, const void *end);
 
 void videoShutdown(void);
 
+// MOD: no limit on bullet holes/blood - Video.UnlimitedDecals (video.c,
+// used by wallhitreset.c)
+extern s32 g_UnlimitedDecals;
+
+// Its extra per-frame display list / vertex buffer bytes (gfxmemory.c), x2 buffers
+#define DECALS_EXTRA_GFX (2048 * 1024)
+#define DECALS_EXTRA_VTX (512 * 1024)
+
+// MOD: extra memp heap (MB) added to Game.MemorySize (main.c): the decals'
+// budgets, and the ragdoll module's corpse budgets when it's built in
+#define EXTRA_MEMP_MB 16
+
 #endif

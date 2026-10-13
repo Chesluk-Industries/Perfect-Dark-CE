@@ -461,6 +461,26 @@ Gfx *sparksRender(Gfx *gdl)
 							f2 = sqrtf(spark->speed.f[0] * spark->speed.f[0] + spark->speed.f[1] * spark->speed.f[1] + spark->speed.f[2] * spark->speed.f[2]);
 							f2 = (sp120 + (type->unk04 + group->age * type->unk08)) / f2;
 
+#ifndef PLATFORM_N64
+							{
+								// MOD: smooth speed - sparks move in 60th steps: drawn
+								// above 60 FPS, carried on by the part of the next step
+								f32 ahead = g_Vars.lvupdate240rem * 0.25f;
+								f32 px = spark->pos.x + spark->speed.f[0] * ahead;
+								f32 py = spark->pos.y + spark->speed.f[1] * ahead;
+								f32 pz = spark->pos.z + spark->speed.f[2] * ahead;
+
+								vertices[0].x = px;
+								vertices[0].y = py;
+								vertices[0].z = pz;
+								vertices[0].colour = 4;
+
+								vertices[1].x = vertices[2].x = px + spark->speed.f[0] * f2;
+								vertices[1].y = vertices[2].y = py + spark->speed.f[1] * f2;
+								vertices[1].z = vertices[2].z = pz + spark->speed.f[2] * f2;
+								vertices[1].colour = 0;
+							}
+#else
 							vertices[0].x = spark->pos.x;
 							vertices[0].y = spark->pos.y;
 							vertices[0].z = spark->pos.z;
@@ -474,6 +494,7 @@ Gfx *sparksRender(Gfx *gdl)
 							vertices[2].x = spark->pos.x + spark->speed.f[0] * f2;
 							vertices[2].y = spark->pos.y + spark->speed.f[1] * f2;
 							vertices[2].z = spark->pos.z + spark->speed.f[2] * f2;
+#endif
 							vertices[2].colour = 0;
 
 							vertices[0].s = 128;

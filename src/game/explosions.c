@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "constants.h"
+#ifndef PLATFORM_N64
+#include "game/lv.h" // MOD: high framerates - LV_STEPS240
+#endif
 #include "game/chraction.h"
 #include "game/dlights.h"
 #include "game/chr.h"
@@ -603,12 +606,35 @@ void explosionsUpdateShake(struct coord *arg0, struct coord *arg1, struct coord 
 		}
 	}
 
+#ifndef PLATFORM_N64
+	{
+		// MOD: explosion shake - the timers count 60ths, not frames
+		s32 steps = LV_STEPS240(4);
+
+		if (g_ExplosionShakeIntensityTimer > 0) {
+			g_ExplosionShakeIntensityTimer -= steps;
+
+			if (g_ExplosionShakeIntensityTimer < 0) {
+				g_ExplosionShakeIntensityTimer = 0;
+			}
+
+			intensity++;
+		}
+
+		g_ExplosionShakeTotalTimer -= steps;
+
+		if (g_ExplosionShakeTotalTimer < 0) {
+			g_ExplosionShakeTotalTimer = 0;
+		}
+	}
+#else
 	if (g_ExplosionShakeIntensityTimer > 0) {
 		g_ExplosionShakeIntensityTimer--;
 		intensity++;
 	}
 
 	g_ExplosionShakeTotalTimer--;
+#endif
 
 	if (g_ExplosionShakeTotalTimer & 2) {
 		arg2->y = intensity;
@@ -884,7 +910,14 @@ void explosionInflictDamage(struct prop *expprop)
 							}
 						} else if (objIsHealthy(obj)) {
 							// Sustained damage
+#ifndef PLATFORM_N64
+							// MOD: high framerates - this runs once per 60th, so
+							// by the 60ths passed, not the frame's fraction (at
+							// 240 FPS lasting blast damage was a quarter)
+							minfrac *= 0.05f * PALUPF((f32)g_Vars.lvupdate60);
+#else
 							minfrac *= 0.05f * g_Vars.lvupdate60freal;
+#endif
 
 							if ((obj->hidden & OBJHFLAG_00001000) == 0
 									&& (obj->flags2 & (OBJFLAG2_LINKEDTOSAFE | OBJFLAG2_IMMUNETOEXPLOSIONS)) == 0) {
@@ -984,7 +1017,11 @@ void explosionInflictDamage(struct prop *expprop)
 							}
 						}
 					} else {
+#ifndef PLATFORM_N64
+						minfrac *= 0.05f * PALUPF((f32)g_Vars.lvupdate60); // MOD: high framerates (as above)
+#else
 						minfrac *= 0.05f * g_Vars.lvupdate60freal;
+#endif
 					}
 
 					if (g_Vars.normmplayerisrunning) {

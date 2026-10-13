@@ -96,7 +96,11 @@ void amgrCreate(ALSynConfig *config)
 	osCreateMesgQueue(&g_AudioManager.audioReplyMsgQ, g_AudioManager.audioReplyMsgBuf, ARRAYCOUNT(g_AudioManager.audioFrameMsgBuf));
 	osCreateMesgQueue(&g_AudioManager.audioFrameMsgQ, g_AudioManager.audioFrameMsgBuf, ARRAYCOUNT(g_AudioManager.audioFrameMsgBuf));
 
+#ifndef PLATFORM_N64
+	var800918ec = 2000 * 4; // MOD: sound capacity (4 x the voices, 4 x the commands)
+#else
 	var800918ec = 2000;
+#endif
 
 #if !PAL
 	if (IS4MB()) {

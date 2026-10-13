@@ -29,6 +29,17 @@
 #endif
 
 /**
+ * MOD: credits timing - the credits' random changes (particle colours and
+ * movement, background layers) were rolled once per drawn frame, so at 240
+ * FPS they changed four times as often. The chances are now per 60th.
+ */
+#ifndef PLATFORM_N64
+#define CREDITS_CHANCE(p) ((p) * (g_Vars.diffframe240 * 0.25f))
+#else
+#define CREDITS_CHANCE(p) (p)
+#endif
+
+/**
  * Credits
  *
  * This file handles both the credits sequence and the alternative title screen.
@@ -687,12 +698,12 @@ void creditsTickParticles(void)
 		}
 	} else {
 #if VERSION >= VERSION_NTSC_1_0
-		if (RANDOMFRAC() < 0.007f && joyGetButtons(0, R_TRIG) == 0) {
+		if (RANDOMFRAC() < CREDITS_CHANCE(0.007f) && joyGetButtons(0, R_TRIG) == 0) {
 			g_CreditsData->particlecolourindex1 = rngRandom() % 4;
 			g_CreditsData->particlecolourweight = 0;
 		}
 #else
-		if (RANDOMFRAC() < 0.007f) {
+		if (RANDOMFRAC() < CREDITS_CHANCE(0.007f)) {
 			g_CreditsData->particlecolourindex1 = rngRandom() % 4;
 			g_CreditsData->particlecolourweight = 0;
 		}
@@ -700,11 +711,11 @@ void creditsTickParticles(void)
 	}
 
 #if VERSION >= VERSION_NTSC_1_0
-	if (RANDOMFRAC() < 0.002f && joyGetButtons(0, R_TRIG) == 0) {
+	if (RANDOMFRAC() < CREDITS_CHANCE(0.002f) && joyGetButtons(0, R_TRIG) == 0) {
 		g_CreditsData->particlemovetype = rngRandom() % 5;
 	}
 #else
-	if (RANDOMFRAC() < 0.002f) {
+	if (RANDOMFRAC() < CREDITS_CHANCE(0.002f)) {
 		g_CreditsData->particlemovetype = rngRandom() % 5;
 	}
 #endif
@@ -720,7 +731,7 @@ void creditsTickParticles(void)
 	}
 #endif
 
-	if (RANDOMFRAC() < 0.007f) {
+	if (RANDOMFRAC() < CREDITS_CHANCE(0.007f)) {
 		g_CreditsData->particleconfignum1 = rngRandom() % 2;
 		g_CreditsData->particleconfignum2 = rngRandom() % 2;
 	}
@@ -1729,7 +1740,7 @@ void creditsTick(void)
 
 	if (g_CreditsData->slidesenabled) {
 		creditsTickSlide();
-	} else if (RANDOMFRAC() < 0.01f && !joyGetButtons(0, R_TRIG)) {
+	} else if (RANDOMFRAC() < CREDITS_CHANCE(0.01f) && !joyGetButtons(0, R_TRIG)) {
 		creditsCreatePendingBgLayers(0xffffffff);
 	}
 
@@ -1752,7 +1763,7 @@ void creditsTick(void)
 
 		if (g_CreditsData->slidesenabled) {
 			creditsTickSlide();
-		} else if (RANDOMFRAC() < 0.01f) {
+		} else if (RANDOMFRAC() < CREDITS_CHANCE(0.01f)) {
 			creditsCreatePendingBgLayers(0xffffffff);
 		}
 

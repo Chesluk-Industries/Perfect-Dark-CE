@@ -22,6 +22,7 @@ FILE *fsFileOpenRead(const char *name);
 void fsFileFree(FILE *f);
 
 const char *fsGetModDir(void);
+void fsSetModDir(const char *); // MOD: light patches - by joshuarwood (perfect_dark PR #722)
 s32 fsCreateDir(const char *path);
 
 #endif
