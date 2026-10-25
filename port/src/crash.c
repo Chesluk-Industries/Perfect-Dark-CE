@@ -58,7 +58,9 @@ static uintptr_t crashGetPreferredBase(void *modbase)
 	return (uintptr_t)nt->OptionalHeader.ImageBase;
 }
 
-static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
+// MOD: hang logs - thread: the thread whose stack it is (the hang watchdog
+// walks the main thread's)
+static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo, HANDLE thread)
 {
 	CONTEXT context = *exinfo->ContextRecord;
 	void *mainbase = crashGetModuleBase(crashInit);
@@ -66,7 +68,6 @@ static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 	uintptr_t mainaddrs[CRASH_MAX_FRAMES + 1];
 	s32 nummainaddrs = 0;
 	HANDLE process = GetCurrentProcess();
-	HANDLE thread = GetCurrentThread();
 
 	SymSetOptions(SymGetOptions() | SYMOPT_DEBUG | SYMOPT_LOAD_LINES);
 	SymInitialize(process, NULL, TRUE);
@@ -117,6 +118,7 @@ static void crashStackTrace(char *msg, PEXCEPTION_POINTERS exinfo)
 	case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: CRASH_MSG(" (array bounds exceeded)"); break;
 	case EXCEPTION_IN_PAGE_ERROR: CRASH_MSG(" (in-page error)"); break;
 	case 0xE0000001: CRASH_MSG(" (abort)"); break;
+	case 0xE0000002: CRASH_MSG(" (hang: the game stopped responding; this is where the main thread was)"); break;
 	default: break;
 	}
 	CRASH_MSG("\n");
@@ -251,7 +253,7 @@ static long __stdcall crashHandler(PEXCEPTION_POINTERS exinfo)
 		sysWriteCrashLogEarly(early);
 	}
 
-	crashStackTrace(msg, exinfo);
+	crashStackTrace(msg, exinfo, GetCurrentThread());
 
 	// MOD: crash logs: always written (pd.crash.log + a dated copy), with or without --log
 	sysWriteCrashLog(msg);
@@ -259,6 +261,94 @@ static long __stdcall crashHandler(PEXCEPTION_POINTERS exinfo)
 	sysFatalError("Crash! A crash log was saved as pd.crash.log.\n\n%s", msg);
 
 	return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+/**
+ * MOD: hang logs - a watchdog thread. When the main thread hasn't finished a
+ * frame for CRASH_HANG_SECONDS (an endless loop: the game freezes with no
+ * crash), it writes a crash log with the main thread's stack and the last
+ * log lines, then leaves the game as it is. Once per hang.
+ */
+#define CRASH_HANG_SECONDS 10
+
+static volatile LONG crashFrames = 0;
+static char crashHangBuf[CRASH_MAX_MSG + 1];
+
+void crashHeartbeat(void)
+{
+	InterlockedIncrement(&crashFrames);
+}
+
+static void crashReportHang(void)
+{
+	HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, crashMainThreadId);
+	CONTEXT context;
+	EXCEPTION_RECORD record;
+	EXCEPTION_POINTERS pointers;
+	s32 ok = 0;
+
+	if (thread == NULL) {
+		return;
+	}
+
+	memset(crashHangBuf, 0, sizeof(crashHangBuf));
+	memset(&context, 0, sizeof(context));
+	memset(&record, 0, sizeof(record));
+
+	if (SuspendThread(thread) != (DWORD)-1) {
+		context.ContextFlags = CONTEXT_FULL;
+
+		if (GetThreadContext(thread, &context)) {
+			record.ExceptionCode = 0xE0000002;
+#ifdef PLATFORM_X86_64
+			record.ExceptionAddress = (void *)(uintptr_t)context.Rip;
+#elif defined(PLATFORM_X86)
+			record.ExceptionAddress = (void *)(uintptr_t)context.Eip;
+#endif
+			pointers.ExceptionRecord = &record;
+			pointers.ContextRecord = &context;
+			crashStackTrace(crashHangBuf, &pointers, thread);
+			ok = 1;
+		}
+
+		ResumeThread(thread);
+	}
+
+	CloseHandle(thread);
+
+	if (ok) {
+		sysLogPrintf(LOG_ERROR, "HANG: the game hasn't finished a frame for %d s, a crash log was saved (pd.crash.log)", CRASH_HANG_SECONDS);
+		sysWriteCrashLog(crashHangBuf);
+	}
+}
+
+static DWORD WINAPI crashWatchdog(LPVOID arg)
+{
+	LONG last = crashFrames;
+	s32 stuck = 0;
+	s32 reported = 0;
+
+	for (;;) {
+		LONG now;
+
+		Sleep(1000);
+		now = crashFrames;
+
+		if (now != last || IsDebuggerPresent()) {
+			last = now;
+			stuck = 0;
+			reported = 0;
+			continue;
+		}
+
+		// (now == 0: no frame yet, still starting up)
+		if (now != 0 && !reported && ++stuck >= CRASH_HANG_SECONDS) {
+			reported = 1;
+			crashReportHang();
+		}
+	}
+
+	return 0;
 }
 
 // abort() (failed asserts, C++ terminate) doesn't go through the exception filter
@@ -454,6 +544,15 @@ void crashInit(void)
 	}
 	signal(SIGABRT, crashAbortHandler);
 	g_CrashEnabled = 1;
+
+	// MOD: hang logs
+	{
+		HANDLE watchdog = CreateThread(NULL, 256 * 1024, crashWatchdog, NULL, 0, NULL);
+
+		if (watchdog) {
+			CloseHandle(watchdog);
+		}
+	}
 #elif defined(PLATFORM_LINUX)
 	struct sigaction sigact = { 0 };
 	sigact.sa_flags = SA_SIGINFO | SA_ONSTACK;
@@ -500,6 +599,13 @@ void crashShutdown(void)
 #endif
 	g_CrashEnabled = 0;
 }
+
+#ifndef PLATFORM_WIN32
+void crashHeartbeat(void)
+{
+	// MOD: hang logs (Windows only)
+}
+#endif
 
 void crashCreateThread(void)
 {

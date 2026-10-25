@@ -437,7 +437,8 @@ static void ragdollGrabTickPlayer(s32 pn)
 	bool held;
 	s32 i;
 
-	if (!g_RagdollGrab || g_Vars.normmplayerisrunning || player == NULL || player->prop == NULL
+	// MOD: combat simulator ragdolls - grabbing works there too
+	if (!g_RagdollGrab || player == NULL || player->prop == NULL
 			|| player->isdead || player->bondmovemode == MOVEMODE_CUTSCENE || g_Vars.tickmode == TICKMODE_CUTSCENE) {
 		rdGrabDrop(pn, "not available");
 		return;
@@ -535,7 +536,10 @@ static void ragdollGrabTickPlayer(s32 pn)
 
 		rd = ragdollFindByHandle(handle);
 
-		if (rd && !rd->isplayer && !rd->fellout) {
+		// MOD: combat simulator ragdolls - no dragging bodies there (objects
+		// still can be). A solid body moves again when picked up.
+		if (rd && !rd->isplayer && !rd->fellout && !g_Vars.normmplayerisrunning) {
+			ragdollUnsolid(rd, "picked up");
 			gr->active = true;
 			gr->rdindex = rd - g_Ragdolls;
 			gr->serial = rd->serial;
@@ -605,7 +609,8 @@ s32 ragdollBodyBlocksShot(struct chrdata *shooter, struct prop *targetprop, stru
 	s32 handle, part, pn, hp;
 	s32 hitpart = HITPART_TORSO;
 
-	if (!g_RagdollsEnabled || !g_RagdollBodyCover || !g_RagdollGrab || targetprop == NULL
+	// MOD: combat simulator ragdolls - not in the Combat Simulator (a held body would be a shield)
+	if (!g_RagdollsEnabled || !g_RagdollBodyCover || !g_RagdollGrab || targetprop == NULL || g_Vars.normmplayerisrunning
 			|| targetprop->type != PROPTYPE_PLAYER || g_RagdollNumUsed == 0 || !pdphysIsReady()) {
 		return false;
 	}

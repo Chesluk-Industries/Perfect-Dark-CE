@@ -90,6 +90,9 @@ void pdphysLevelFinish(pdphysLevelStats *stats);
 int pdphysRaycast(const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom);
 // Same, but in any room (pdphysRaycast only sees the rooms ragdolls are in)
 int pdphysRaycastAnyRoom(const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom);
+// MOD: gravity - same, level surfaces only (no props), in the given rooms
+// (num <= 0: any room)
+int pdphysRaycastRagdollWorldRooms(const int *rooms, int num, const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom);
 // Like pdphysRaycast, but only the level rooms that ragdoll collides with
 int pdphysRagdollRaycast(int handle, const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom);
 
@@ -123,22 +126,12 @@ typedef struct pdphysContact {
 	float normal[3];  // the surface's normal, facing the shape
 } pdphysContact;
 
-// Sweeps a vertical capsule (as below) and returns every contact, earliest
-// first (at most maxcontacts). The caller decides which ones count.
+// Sweeps a vertical capsule (centre at 'from', cylinder half height
+// 'halfheight' (0: a sphere), radius) to 'to' against the level groups in
+// groupmask and returns every contact, earliest first (at most maxcontacts).
+// The caller decides which ones count.
 int pdphysSweepCapsuleContacts(const float from[3], const float to[3], float radius, float halfheight,
 		unsigned int groupmask, pdphysContact *out, int maxcontacts);
-
-// MOD: clipping checks - sweeps a vertical capsule (centre at 'from', cylinder
-// half height 'halfheight' (0: a sphere), radius) to 'to' against the level
-// groups in groupmask. Contacts whose normal.y is >= maxnormaly or <=
-// minnormaly, or that the move doesn't go into, are ignored, and so are
-// contacts with geometry of the covermask groups within coverdist of them
-// (along the contact normal, both sides; covermask 0: no such test). Returns
-// 1 if something stops it: the fraction of the move (0..1) and the surface's
-// horizontal normal.
-int pdphysSweepCapsuleLevelGroups(const float from[3], const float to[3], float radius, float halfheight,
-		unsigned int groupmask, float maxnormaly, float minnormaly, unsigned int covermask, float coverdist,
-		float *outfraction, float outnormal[3]);
 
 // Finds the ragdoll part along a ray (level geometry blocks it; kinematic
 // props such as the player's own collision cylinder don't). With radius > 0,
@@ -247,6 +240,8 @@ int pdphysTakePropImpacts(pdphysPropImpact *out, int max);
 // wall, a ceiling, the side of a prop or character, another body) since the
 // last call. Clears them. Used to end the animation blend.
 void pdphysRagdollTakeNewBlocks(int handle, int *outflags);
+// MOD: combat simulator ragdolls - static (collides, never moves or wakes) or dynamic again
+void pdphysRagdollSetSolid(int handle, int solid);
 // Keeps every part awake (they may not fall asleep) for this many seconds
 void pdphysRagdollKeepAwake(int handle, float seconds);
 // Water around the ragdoll: it floats on a surface at surfacey (PD units); inwater 0 = none
@@ -270,6 +265,9 @@ void pdphysRagdollGetPartPos(int handle, int part, float outpos[3]);
 
 // Advances the simulation by dt seconds.
 void pdphysStep(float dt);
+
+// MOD: gravity - the world's gravity as a scale of the original (1 = 9.81)
+void pdphysSetGravityScale(float scale);
 
 /*
  * Props (stage 4): doors, lifts and furniture as kinematic bodies that only

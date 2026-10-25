@@ -3,6 +3,9 @@
 #include "bss.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 void sparksTick(void)
 {
@@ -40,7 +43,11 @@ void sparksTick(void)
 						// Update this spark if active
 						if (spark->ttl) {
 							spark->speed.x -= spark->speed.x * type->decel;
+#ifdef PD_GRAVITY
+							spark->speed.y = (spark->speed.y - spark->speed.y * type->decel) - type->weight * gravityScale(); // MOD: gravity
+#else
 							spark->speed.y = (spark->speed.y - spark->speed.y * type->decel) - type->weight;
+#endif
 							spark->speed.z -= spark->speed.z * type->decel;
 
 							if (spark->speed.y == 0.0f) {

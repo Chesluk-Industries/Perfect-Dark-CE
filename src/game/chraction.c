@@ -2,7 +2,9 @@
 #include "constants.h"
 #ifdef PD_PHYSICS
 #include "ragdoll.h" // MOD: ragdoll physics
-#include "game/cheats.h" // MOD: Deadly Punch
+#endif
+#ifndef PLATFORM_N64
+#include "game/cheats.h" // MOD: Deadly Punch, short chr navigation (Small Characters)
 #endif
 #include "game/acosfasinf.h"
 #include "game/atan2f.h"
@@ -60,6 +62,20 @@
 #include "lib/vi.h"
 #include "data.h"
 #include "types.h"
+#ifndef PLATFORM_N64
+#include "system.h" // MOD: psychosis no knockout - sysLogPrintf
+#include "bodyview.h" // MOD: body awareness
+#endif
+
+#ifndef PLATFORM_N64
+// MOD: high framerates - path following runs every frame: its give-up
+// counters (iter) and "every 10 ticks" checks (age) count 60ths, not calls
+// (at 240 FPS a blocked chr gave up on its way round an obstacle within
+// 25 ms and walked into it: simulants stuck in place)
+#define WAYSTEP60 (g_Vars.lvupdate60 > 0)
+#else
+#define WAYSTEP60 1
+#endif
 
 s32 g_RecentQuipsPlayed[5];
 u32 var8009cd84;
@@ -5027,6 +5043,9 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 
 					if (chr->damage >= chr->maxdamage) {
 						chrDie(chr, aplayernum);
+#ifdef PD_PHYSICS
+						ragdollOnBotDeath(chr, vector, hitpart, gset); // MOD: combat simulator ragdolls
+#endif
 					}
 				} else if (explosion) {
 					// Chrs die instantly from explosion damage provided they
@@ -5089,11 +5108,23 @@ void chrDamage(struct chrdata *chr, f32 damage, struct coord *vector, struct gse
 
 					if (makedizzy && chr->damage >= chr->maxdamage) {
 						chr->damage = chr->maxdamage - 0.1f;
-#ifdef PD_PHYSICS
-						// MOD: ragdoll physics - knockouts fall as ragdolls
-						ragdollOnChrKnockOut(chr, vector, hitpart, gset);
+#ifndef PLATFORM_N64
+						// MOD: psychosis no knockout - a psychosis headshot (4x) can
+						// reach maxdamage. In the original the argh below overwrote
+						// the knockout at once; the knockout fix in chrReactToDamage
+						// keeps it, so the guard went down. The gun never knocks out.
+						if (gsetHasFunctionFlags(gset, FUNCFLAG_PSYCHOSIS)) {
+							sysLogPrintf(LOG_NOTE, "PSYCHOSIS: chr %d took enough psychosis damage to be knocked out (hitpart %d): kept standing",
+								chr->chrnum, hitpart);
+						} else
 #endif
-						chrKnockOut(chr, angle, hitpart, gset);
+						{
+#ifdef PD_PHYSICS
+							// MOD: ragdoll physics - knockouts fall as ragdolls
+							ragdollOnChrKnockOut(chr, vector, hitpart, gset);
+#endif
+							chrKnockOut(chr, angle, hitpart, gset);
+						}
 					}
 
 					// If chr has armour or the weapon doesn't stun
@@ -5204,6 +5235,40 @@ bool func0f03645c(struct chrdata *chr, struct coord *arg1, RoomNum *arg2, struct
 	return result;
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: short chr navigation - pads and other chrs are at a full-size chr's
+ * root height (about 100 above the floor), and the navigation measures from
+ * the chr's own root. A shorter chr (a Maian, or with Small Characters) has
+ * its root lower (about 62), which threw off two checks:
+ * - The path checks sweep the chr's cylinder (20 above its floor up to 185)
+ *   as offsets from its root, so at the destination its top ended up higher
+ *   and hit low ceilings and door frames a full-size chr fits under. The top
+ *   is kept where a full-size chr's would be.
+ * - Arriving at a pad needs the chr within 150 of it vertically: a short chr
+ *   below a raised pad never got there and circled under it. It's measured
+ *   from where a full-size chr's root would be.
+ */
+#define CHRNAV_SHORTBODY 140    // body heights below this are short (Joanna 159, Elvis 106)
+#define CHRNAV_ROOTHEIGHT 100.0f // a full-size chr's root above its floor
+#define CHRNAV_ROOTTOTOP 85.0f   // ... and to the top of its cylinder (185)
+
+static bool chrNavIsShort(struct chrdata *chr)
+{
+	return CHRRACE(chr) == RACE_HUMAN
+		&& (cheatIsActive(CHEAT_SMALLCHARACTERS) || (chr->bodynum >= 0 && g_HeadsAndBodies[chr->bodynum].height < CHRNAV_SHORTBODY));
+}
+
+static void chrNavGetBbox(struct prop *prop, f32 *radius, f32 *ymax, f32 *ymin)
+{
+	chrGetBbox(prop, radius, ymax, ymin);
+
+	if (chrNavIsShort(prop->chr) && *ymax > prop->pos.y + CHRNAV_ROOTTOTOP) {
+		*ymax = prop->pos.y + CHRNAV_ROOTTOTOP;
+	}
+}
+#endif
+
 bool func0f03654c(struct chrdata *chr, struct coord *pos, RoomNum *rooms, struct coord *pos2, RoomNum *rooms2, struct coord *vector, f32 arg6, u32 types)
 {
 	struct coord tmp;
@@ -5222,7 +5287,11 @@ bool func0f03654c(struct chrdata *chr, struct coord *pos, RoomNum *rooms, struct
 	prop = chr->prop;
 
 	chrSetPerimEnabled(chr, false);
+#ifndef PLATFORM_N64
+	chrNavGetBbox(prop, &radius, &ymax, &ymin); // MOD: short chr navigation
+#else
 	chrGetBbox(prop, &radius, &ymax, &ymin);
+#endif
 
 	if ((rooms2 && cdTestCylMove02(pos, rooms, pos2, rooms2, types, true, ymax - prop->pos.y, ymin - prop->pos.y))
 			|| (rooms2 == NULL && cdTestCylMove01(pos, rooms, pos2, types, 1, ymax - prop->pos.y, ymin - prop->pos.y))) {
@@ -8261,8 +8330,8 @@ void chrFadeCorpse(struct chrdata *chr)
 void chrFadeCorpseWhenOffScreen(struct chrdata *chr)
 {
 #ifdef PD_PHYSICS
-	// MOD: ragdoll physics - ragdoll corpses stay (Ragdoll.RagdollMaxBodies limits them)
-	if (chr->actiontype == ACT_DEAD && !ragdollIsChrRagdolled(chr)) {
+	// MOD: ragdoll physics - ragdoll corpses stay (Max Bodies limits them), unless it's Vanilla
+	if (chr->actiontype == ACT_DEAD && (!ragdollIsChrRagdolled(chr) || ragdollBodiesVanilla())) {
 #else
 	if (chr->actiontype == ACT_DEAD) {
 #endif
@@ -8290,6 +8359,13 @@ void chrTickDead(struct chrdata *chr)
 		} else {
 			// Still fading
 			chr->fadealpha = (TICKS(90) - chr->act_dead.fadetimer60) * 255 / TICKS(90);
+#ifdef PD_PHYSICS
+
+			// MOD: combat simulator ragdolls - a simulant's body stays when it respawns
+			if (aibot && ragdollMpKeepsBody(chr)) {
+				chr->fadealpha = 0xff;
+			}
+#endif
 		}
 	} else {
 		// If fade has been triggered (this can happen when the corpse is on
@@ -11937,6 +12013,27 @@ bool posIsArrivingAtPos(struct coord *prevpos, struct coord *curpos, struct coor
 	return posIsArrivingLaterallyAtPos(prevpos, curpos, targetpos, range);
 }
 
+#ifndef PLATFORM_N64
+// MOD: short chr navigation - posIsArrivingAtPos for the chr (see chrNavIsShort)
+static bool chrNavIsArrivingAtPos(struct chrdata *chr, struct coord *targetpos, f32 range)
+{
+	struct coord prevpos = chr->prevpos;
+	struct coord curpos = chr->prop->pos;
+	f32 raise = CHRNAV_ROOTHEIGHT - (curpos.y - chr->manground);
+
+	if (chrNavIsShort(chr) && raise > 0.0f) {
+		prevpos.y += raise;
+		curpos.y += raise;
+	}
+
+	return posIsArrivingAtPos(&prevpos, &curpos, targetpos, range);
+}
+
+#define CHRNAV_ARRIVING(chr, targetpos, range) chrNavIsArrivingAtPos(chr, targetpos, range)
+#else
+#define CHRNAV_ARRIVING(chr, targetpos, range) posIsArrivingAtPos(&(chr)->prevpos, &(chr)->prop->pos, targetpos, range)
+#endif
+
 void chrTickRunPos(struct chrdata *chr)
 {
 	struct prop *prop = chr->prop;
@@ -12054,6 +12151,29 @@ void func0f044b68(struct coord *arg0, struct coord *arg1, struct coord *arg2)
  * This is similar to chrNavCheckForObstacle. The difference between the two are
  * not yet understood.
  */
+#ifndef PLATFORM_N64
+/**
+ * MOD: crouch navigation - crawl spaces (Warehouse vents). Their pads
+ * (PADFLAG_AICROUCH) are about 50 above the floor, but a crouching chr's root
+ * stays near 100, so the path checks' sweep to the pad (which ends at the
+ * pad's height) put the cylinder's bottom below the vent floor: the chr
+ * "couldn't see" the next pad and went back and forth in the vent (worst at
+ * 240 FPS). At a tunnel's end, where the floor steps up to the next pad, the
+ * sweep's top rose with it and hit the tunnel mouth's lintel instead. While
+ * crouching, a pad up to 100 above or below is swept to at the chr's own
+ * height (dropping into a tunnel from the junctions is about 62).
+ */
+static f32 chrNavSweepEndY(struct chrdata *chr, struct coord *chrpos, f32 y)
+{
+	if (chr->actiontype == ACT_GOPOS && (chr->act_gopos.flags & GOPOSFLAG_CROUCH)
+			&& y > chrpos->y - 100.0f && y < chrpos->y + 100.0f) {
+		return chrpos->y;
+	}
+
+	return y;
+}
+#endif
+
 bool chrNavCanSeeNextPos(struct chrdata *chr, struct coord *chrpos, RoomNum *chrrooms, struct coord *aimpos, struct coord *leftpos, struct coord *rightpos, f32 negchrradius, f32 chrradius, s32 cdtypes, s32 arg9)
 {
 	struct coord spd4;
@@ -12077,8 +12197,22 @@ bool chrNavCanSeeNextPos(struct chrdata *chr, struct coord *chrpos, RoomNum *chr
 	RoomNum sp50[8];
 	RoomNum sp40[8];
 	struct prop *prop = chr->prop;
+#ifndef PLATFORM_N64
+	struct coord sweepaim; // MOD: crouch navigation
+	struct coord *centreaim = &sweepaim;
+#else
+	struct coord *centreaim = aimpos;
+#endif
 
+#ifndef PLATFORM_N64
+	chrNavGetBbox(prop, &radius2, &ymax, &ymin); // MOD: short chr navigation
+
+	// MOD: crouch navigation - every sweep to the pad ends at this height
+	sweepaim = *aimpos;
+	sweepaim.y = chrNavSweepEndY(chr, chrpos, aimpos->y);
+#else
 	chrGetBbox(prop, &radius2, &ymax, &ymin);
+#endif
 
 	spd4.x = aimpos->x - chrpos->x;
 	spd4.y = 0.0f;
@@ -12103,7 +12237,11 @@ bool chrNavCanSeeNextPos(struct chrdata *chr, struct coord *chrpos, RoomNum *chr
 	sp6c.y = chrpos->y;
 	sp6c.z = chrpos->z - spd0;
 	sp60.x = (spd4.x * negchrradius) + (aimpos->x + spc4);
+#ifndef PLATFORM_N64
+	sp60.y = sweepaim.y; // MOD: crouch navigation
+#else
 	sp60.y = aimpos->y;
+#endif
 	sp60.z = (spd4.z * negchrradius) + (aimpos->z - spc8);
 
 	if (cdExamCylMove07(chrpos, chrrooms, &sp6c, sp50, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) == CDRESULT_COLLISION
@@ -12128,7 +12266,11 @@ bool chrNavCanSeeNextPos(struct chrdata *chr, struct coord *chrpos, RoomNum *chr
 	sp6c.z = chrpos->z + spd0;
 
 	sp60.x = (spd4.x * negchrradius) + (aimpos->x - spc4);
+#ifndef PLATFORM_N64
+	sp60.y = sweepaim.y; // MOD: crouch navigation
+#else
 	sp60.y = aimpos->y;
+#endif
 	sp60.z = (spd4.z * negchrradius) + (aimpos->z + spc8);
 
 	if (cdExamCylMove07(chrpos, chrrooms, &sp6c, sp50, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) == CDRESULT_COLLISION
@@ -12175,8 +12317,8 @@ bool chrNavCanSeeNextPos(struct chrdata *chr, struct coord *chrpos, RoomNum *chr
 		rightpos->x = sp88.x;
 		rightpos->y = sp88.y;
 		rightpos->z = sp88.z;
-	} else if (cdExamCylMove07(chrpos, chrrooms, aimpos, sp40, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION
-			&& (!arg9 || cdExamCylMove01(chrpos, aimpos, chrradius, sp40, cdtypes, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION)) {
+	} else if (cdExamCylMove07(chrpos, chrrooms, centreaim, sp40, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION
+			&& (!arg9 || cdExamCylMove01(chrpos, centreaim, chrradius, sp40, cdtypes, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION)) {
 		result = true;
 	} else {
 #if VERSION >= VERSION_JPN_FINAL
@@ -12236,8 +12378,22 @@ bool chrNavCheckForObstacle(struct chrdata *chr, struct coord *chrpos, RoomNum *
 	RoomNum sp50[8];
 	RoomNum sp40[8];
 	struct prop *prop = chr->prop;
+#ifndef PLATFORM_N64
+	struct coord sweepaim; // MOD: crouch navigation
+	struct coord *centreaim = &sweepaim;
+#else
+	struct coord *centreaim = aimpos;
+#endif
 
+#ifndef PLATFORM_N64
+	chrNavGetBbox(prop, &radius2, &ymax, &ymin); // MOD: short chr navigation
+
+	// MOD: crouch navigation - every sweep to the pad ends at this height
+	sweepaim = *aimpos;
+	sweepaim.y = chrNavSweepEndY(chr, chrpos, aimpos->y);
+#else
 	chrGetBbox(prop, &radius2, &ymax, &ymin);
+#endif
 
 	spd4.x = aimpos->x - chrpos->x;
 	spd4.y = 0.0f;
@@ -12262,7 +12418,11 @@ bool chrNavCheckForObstacle(struct chrdata *chr, struct coord *chrpos, RoomNum *
 	sp6c.y = chrpos->y;
 	sp6c.z = chrpos->z - spd0;
 	sp60.x = (spd4.x * negchrradius) + (aimpos->x + spc4);
+#ifndef PLATFORM_N64
+	sp60.y = sweepaim.y; // MOD: crouch navigation
+#else
 	sp60.y = aimpos->y;
+#endif
 	sp60.z = (spd4.z * negchrradius) + (aimpos->z - spc8);
 
 	if (cdExamCylMove07(chrpos, chrrooms, &sp6c, sp50, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) == CDRESULT_COLLISION
@@ -12288,7 +12448,11 @@ bool chrNavCheckForObstacle(struct chrdata *chr, struct coord *chrpos, RoomNum *
 	sp6c.z = chrpos->z + spd0;
 
 	sp60.x = (spd4.x * negchrradius) + (aimpos->x - spc4);
+#ifndef PLATFORM_N64
+	sp60.y = sweepaim.y; // MOD: crouch navigation
+#else
 	sp60.y = aimpos->y;
+#endif
 	sp60.z = (spd4.z * negchrradius) + (aimpos->z + spc8);
 
 	if (cdExamCylMove07(chrpos, chrrooms, &sp6c, sp50, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) == CDRESULT_COLLISION
@@ -12343,8 +12507,8 @@ bool chrNavCheckForObstacle(struct chrdata *chr, struct coord *chrpos, RoomNum *
 		rightpos->x = sp88.x;
 		rightpos->y = sp88.y;
 		rightpos->z = sp88.z;
-	} else if (cdExamCylMove07(chrpos, chrrooms, aimpos, sp40, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION
-			&& (!hasobstacle || cdExamCylMove01(chrpos, aimpos, chrradius, sp40, cdtypes, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION)) {
+	} else if (cdExamCylMove07(chrpos, chrrooms, centreaim, sp40, cdtypes, 1, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION
+			&& (!hasobstacle || cdExamCylMove01(chrpos, centreaim, chrradius, sp40, cdtypes, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y) != CDRESULT_COLLISION)) {
 		result = true;
 	} else {
 #if VERSION >= VERSION_JPN_FINAL
@@ -12581,7 +12745,7 @@ void chrNavTickMain(struct chrdata *chr, struct coord *nextpos, struct waydata *
 				// Can't see the obstacle either!
 				// Remain in LOST1 for 5 iterations to see if line of sight
 				// comes back. If not, retry the next pad again.
-				waydata->iter++;
+				waydata->iter += WAYSTEP60;
 
 				if (waydata->iter > 5) {
 					waydata->mode = WAYMODE_RETRY;
@@ -12605,7 +12769,7 @@ void chrNavTickMain(struct chrdata *chr, struct coord *nextpos, struct waydata *
 				// Still can't see the obstacle using the desparate check.
 				// Remain in LOST2 for 5 iterations to see if line of sight
 				// comes back.
-				waydata->iter++;
+				waydata->iter += WAYSTEP60;
 
 				if (waydata->iter > 5) {
 					// Clear any references to the obstacle we were trying to
@@ -12776,7 +12940,7 @@ void chrNavTickMain(struct chrdata *chr, struct coord *nextpos, struct waydata *
 				}
 			}
 
-			waydata->iter++;
+			waydata->iter += WAYSTEP60;
 
 			if (waydata->iter > 5) {
 				waydata->gotaimposobj = false;
@@ -12792,7 +12956,7 @@ void chrNavTickMain(struct chrdata *chr, struct coord *nextpos, struct waydata *
 	}
 
 	// Every 10 ticks, attempt to open any door in front of the chr
-	if (waydata->age % 10 == 0) {
+	if (WAYSTEP60 && waydata->age % 10 == 0) {
 		struct prop *doorprop = chrOpenDoor(chr, &waydata->aimposobj);
 
 		// Consider returning to stand animation while door is opening
@@ -13031,7 +13195,7 @@ void chrTickGoPos(struct chrdata *chr)
 		chr->hidden &= ~CHRHFLAG_NEEDANIM;
 	}
 
-	chr->act_gopos.waydata.age++;
+	chr->act_gopos.waydata.age += WAYSTEP60;
 
 	// If stuck for 1 second
 	if (chr->lastmoveok60 < g_Vars.lvframe60 - TICKS(60)) {
@@ -13126,7 +13290,7 @@ void chrTickGoPos(struct chrdata *chr)
 		if (waypoint) {
 			padUnpack(waypoint->padnum, PADFIELD_FLAGS | PADFIELD_POS, &pad);
 
-			arrivingxyz = posIsArrivingAtPos(&chr->prevpos, &prop->pos, &pad.pos, 30);
+			arrivingxyz = CHRNAV_ARRIVING(chr, &pad.pos, 30); // MOD: short chr navigation
 			arrivingxz = posIsArrivingLaterallyAtPos(&chr->prevpos, &prop->pos, &pad.pos, 30);
 
 			if (pad.flags & PADFLAG_AICROUCH) {
@@ -13134,6 +13298,25 @@ void chrTickGoPos(struct chrdata *chr)
 			} else if (pad.flags & PADFLAG_AIDUCK) {
 				chr->act_gopos.flags |= GOPOSFLAG_DUCK;
 			}
+
+#ifndef PLATFORM_N64
+			// MOD: crouch navigation - stay crouched on the way out of a crawl
+			// space: the pad after a crouch pad can be a standing one (Warehouse
+			// vent junctions, pads 23-25), and the chr stood up while still in
+			// the low tunnel, so the path check hit its ceiling and the chr went
+			// back and forth there
+			if (!(pad.flags & (PADFLAG_AICROUCH | PADFLAG_AIDUCK))
+					&& chr->act_gopos.curindex > 0
+					&& chr->act_gopos.waypoints[chr->act_gopos.curindex - 1]) {
+				struct pad prevpad;
+
+				padUnpack(chr->act_gopos.waypoints[chr->act_gopos.curindex - 1]->padnum, PADFIELD_FLAGS, &prevpad);
+
+				if (prevpad.flags & PADFLAG_AICROUCH) {
+					chr->act_gopos.flags |= GOPOSFLAG_CROUCH;
+				}
+			}
+#endif
 
 			if ((pad.flags & PADFLAG_AIWAITLIFT) || (pad.flags & PADFLAG_AIONLIFT)) {
 				advance = chrGoPosUpdateLiftAction(chr, pad.flags, arrivingxz, arrivingxyz, waypoint->padnum, chrGoPosGetNextPadNum(chr));
@@ -13144,7 +13327,7 @@ void chrTickGoPos(struct chrdata *chr)
 			}
 		} else {
 			// No more waypoints - chr is finished
-			if (posIsArrivingAtPos(&chr->prevpos, &prop->pos, &chr->act_gopos.endpos, 30) ||
+			if (CHRNAV_ARRIVING(chr, &chr->act_gopos.endpos, 30) || // MOD: short chr navigation
 					(chr->inlift && posIsArrivingLaterallyAtPos(&chr->prevpos, &prop->pos, &chr->act_gopos.endpos, 30))) {
 				if (chr->act_gopos.flags & GOPOSFLAG_FORPATHSTART) {
 					chrTryStartPatrol(chr);
@@ -13163,7 +13346,7 @@ void chrTickGoPos(struct chrdata *chr)
 		// Every 10 ticks: Check something a couple of waypoints ahead
 		// This might be checking if the chr has line of sight to that pad and can
 		// walk straight to it.
-		if (chr->act_gopos.waydata.age % 10 == 5 || (chr->act_gopos.flags & GOPOSFLAG_INIT)) {
+		if ((WAYSTEP60 && chr->act_gopos.waydata.age % 10 == 5) || (chr->act_gopos.flags & GOPOSFLAG_INIT)) {
 			// Load waypoint that the chr is running to
 			waypoint = chr->act_gopos.waypoints[chr->act_gopos.curindex];
 
@@ -13214,7 +13397,7 @@ void chrTickGoPos(struct chrdata *chr)
 			}
 		}
 
-		if (chr->act_gopos.waydata.age % 10 == 0 || (chr->act_gopos.flags & GOPOSFLAG_INIT)) {
+		if ((WAYSTEP60 && chr->act_gopos.waydata.age % 10 == 0) || (chr->act_gopos.flags & GOPOSFLAG_INIT)) {
 			waypoint = chr->act_gopos.waypoints[chr->act_gopos.curindex];
 
 			if (waypoint) {
@@ -13326,7 +13509,7 @@ void chrTickPatrol(struct chrdata *chr)
 
 	chrPatrolGetCurWaypointInfoWithFlags(chr, &sp58, sp48, &flags);
 
-	chr->act_patrol.waydata.age++;
+	chr->act_patrol.waydata.age += WAYSTEP60;
 
 	// Consider starting magic
 	if (chr->act_patrol.waydata.mode != WAYMODE_MAGIC
@@ -13354,7 +13537,7 @@ void chrTickPatrol(struct chrdata *chr)
 		footstepCheckMagic(chr);
 	} else {
 		arrivinglaterally = posIsArrivingLaterallyAtPos(&chr->prevpos, &prop->pos, &sp58, 30);
-		arriving = posIsArrivingAtPos(&chr->prevpos, &prop->pos, &sp58, 30);
+		arriving = CHRNAV_ARRIVING(chr, &sp58, 30); // MOD: short chr navigation
 		advance = false;
 
 		if ((flags & PADFLAG_AIWAITLIFT) || (flags & PADFLAG_AIONLIFT)) {
@@ -13761,7 +13944,12 @@ void chraTick(struct chrdata *chr)
 		chr->hidden &= ~(CHRHFLAG_IS_HEARING_TARGET | CHRHFLAG_CONSIDERPROXIES);
 #endif
 
+#ifndef PLATFORM_N64
+		// MOD: body awareness - the player already makes their own footsteps
+		if (pass && !bodyViewIsSilentBody(chr)) {
+#else
 		if (pass) {
+#endif
 			footstepCheckDefault(chr);
 		}
 	} else {
@@ -13941,7 +14129,7 @@ void chraTickBg(void)
 #ifdef PD_PHYSICS
 				if ((chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0))
-						&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - own limits
+						&& (!ragdollIsChrRagdolled(chr) || ragdollBodiesVanilla())) { // MOD: ragdoll physics - own limits (unless Max Bodies is Vanilla)
 #else
 				if (chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0)) {
@@ -14027,7 +14215,7 @@ void chraTickBg(void)
 #ifdef PD_PHYSICS
 				if ((chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && chr->prop && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0))
-						&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - own limits (Ragdoll.RagdollMaxBodies)
+						&& (!ragdollIsChrRagdolled(chr) || ragdollBodiesVanilla())) { // MOD: ragdoll physics - own limits (Ragdoll.RagdollMaxBodies), unless it's Vanilla
 #else
 				if (chr->actiontype == ACT_DEAD
 						|| (chr->actiontype == ACT_DRUGGEDKO && chr->prop && (chr->chrflags & CHRCFLAG_KEEPCORPSEKO) == 0)) {

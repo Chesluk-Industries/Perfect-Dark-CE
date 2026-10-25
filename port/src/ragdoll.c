@@ -7,6 +7,11 @@
  */
 
 #include "ragdoll/rd_internal.h"
+#include "game/body.h"     // MOD: combat simulator ragdolls - the fresh model at a respawn
+#include "game/modelmgr.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 s32 g_RagdollsEnabled = 1;
 f32 g_RagdollPushScale = 0.8f;
@@ -16,8 +21,11 @@ f32 g_RagdollMuscleStrengthMin = 1.0f;
 f32 g_RagdollMuscleTimeMin = 1.0f;
 f32 g_RagdollReflexStrengthMin = 1.2f;
 s32 g_RagdollTestSpawnKey = 0;
-s32 g_RagdollMaxBodies = 0;    // corpses kept as ragdolls; oldest fades out. 0 = unlimited
-s32 g_RagdollMaxPhysical = 0;  // bodies kept in the physics world; older ones freeze in place. 0 = unlimited
+s32 g_RagdollMaxBodies = 0;    // corpses kept as ragdolls; oldest fades out. 0 = unlimited, -1 = vanilla (they fade off-screen as in the original)
+s32 g_RagdollMaxPhysical = 0;  // bodies kept in the physics world; older ones freeze in place. 0 = unlimited (at least RD_MINACTIVE)
+// MOD: combat simulator ragdolls - its own limits (-1 = vanilla: the body goes with its owner at respawn)
+s32 g_RagdollMpMaxBodies = 32;
+s32 g_RagdollMpMaxPhysical = 32;
 s32 g_RagdollChrPush = 0;       // living chrs and players push bodies around
 s32 g_RdPropMeshLogged = 0;
 s32 g_RagdollGrab = 1;          // hold Use (E / B) on a body to drag the part you're aiming at
@@ -50,6 +58,7 @@ f32 g_RagdollScreamAirTime = 1.5f;     // seconds in the air before a body screa
 f32 g_RagdollGlassBreakSpeed = 420.0f; // a body part hitting breakable glass this fast (units/s) breaks it
 s32 g_RagdollBodyCover = 1;            // a body the player holds in front of him stops shots at him
 f32 g_RagdollReflexStrength = 2.0f;   // reflex torque multiplier (0-3)
+s32 g_RagdollMpSolid = RD_SOLID_COMBATSIM; // MOD: combat simulator ragdolls - resting bodies turn solid (RD_SOLID_*)
 
 #ifdef PD_PHYSICS
 
@@ -194,7 +203,11 @@ void ragdollStageUnload(void)
 	g_RdPropSnaps = NULL;
 }
 #define RD_SETTLETIME60 (60 * 6) // treat as settled (ACT_DEAD) after 6 s even if still moving
-#define RD_EXTRACHRSLOTS 48      // extra chr/model slots per level, for corpses and test spawns
+#define RD_MPBOTDEAD60  (60 * 2) // MOD: combat simulator ragdolls - a simulant's respawn countdown starts 2 s after death at the latest, like the death animations
+// Extra chr/model/prop slots per level (about 1.3 KB each): guards spawned
+// during a mission, test dummies and the Combat Simulator's bodies (each
+// respawn leaves one as a new chr). As many as Max Bodies allows.
+#define RD_EXTRACHRSLOTS RD_MAXBODIES_LIMIT
 
 /*
  * Human. Masses for an average adult (about 80 kg; segment shares after
@@ -630,6 +643,11 @@ static void ragdollPropagateRigidParts(struct ragdoll *rd)
 			local[0] = rd->localpos[i].x * rd->scale;
 			local[1] = rd->localpos[i].y * rd->scale;
 			local[2] = rd->localpos[i].z * rd->scale;
+
+			// DK Mode: a hand is drawn out at the arm's scale
+			if (rdDkArmPart(rd, i)) {
+				rdVecScale(local, RD_DK_ARMSCALE, local);
+			}
 			rdRotApply(&rd->world[p], local, offset);
 
 			rdVecAdd(rd->world[p].m[3], offset, rd->world[i].m[3]);
@@ -694,13 +712,41 @@ static void ragdollGetPushSpeeds(struct ragdoll *rd, struct gset *gset, f32 *hit
 }
 
 /**
+ * MOD: combat simulator ragdolls - solo/co-op and the Combat Simulator have
+ * their own limits. Max Active Bodies: the most simulated at once.
+ */
+s32 ragdollMaxActive(void)
+{
+	s32 setting = g_Vars.normmplayerisrunning ? g_RagdollMpMaxPhysical : g_RagdollMaxPhysical;
+
+	if (setting <= 0 || setting > RD_MAXRAGDOLLS) {
+		return RD_MAXRAGDOLLS;
+	}
+
+	return setting < RD_MINACTIVE ? RD_MINACTIVE : setting;
+}
+
+// Max Bodies on Vanilla: bodies go as in the original
+bool ragdollBodiesVanilla(void)
+{
+	return (g_Vars.normmplayerisrunning ? g_RagdollMpMaxBodies : g_RagdollMaxBodies) < 0;
+}
+
+// Resting Bodies Turn Solid applies to the current game
+bool ragdollSolidEnabled(void)
+{
+	return g_RagdollMpSolid == RD_SOLID_BOTH || (g_RagdollMpSolid == RD_SOLID_COMBATSIM && g_Vars.normmplayerisrunning);
+}
+
+/**
  * Keeps at most Ragdoll.RagdollMaxBodies ragdoll corpses: the oldest settled
  * corpse is told to fade out (the game then removes it, freeing the slot).
  */
 static void ragdollEnforceBodyLimit(void)
 {
 	RD_CRASHCTX("enforcebodylimit", -1, -1);
-	s32 limit = g_RagdollMaxBodies > 0 ? g_RagdollMaxBodies : RD_MAXRAGDOLLS;
+	s32 setting = g_Vars.normmplayerisrunning ? g_RagdollMpMaxBodies : g_RagdollMaxBodies;
+	s32 limit = setting > 0 ? RD_MAX(setting, RD_MINBODIES) : RD_MAXRAGDOLLS; // (Vanilla: the game's own fading)
 	s32 count = 0;
 	s32 fading = 0;
 	struct ragdoll *oldest = NULL;
@@ -719,7 +765,9 @@ static void ragdollEnforceBodyLimit(void)
 
 		if (rd->chr->actiontype == ACT_DEAD && (rd->chr->act_dead.fadenow || rd->chr->act_dead.fadetimer60 >= 0)) {
 			fading++;
-		} else if (rd->chr->actiontype == ACT_DEAD && (oldest == NULL || rd->serial < oldest->serial)) {
+		} else if (rd->chr->actiontype == ACT_DEAD && !rd->isplayer
+				&& rd->chr->aibot == NULL // (a simulant's own body: fading it would respawn it early)
+				&& (oldest == NULL || rd->serial < oldest->serial)) {
 			oldest = rd;
 		}
 	}
@@ -727,6 +775,8 @@ static void ragdollEnforceBodyLimit(void)
 	// +1 for the body about to be created
 	if (count - fading + 1 > limit && oldest) {
 		oldest->chr->act_dead.fadenow = true;
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: %d bodies (max %d%s): the oldest, chr %d, fades out",
+				count - fading, limit, g_Vars.normmplayerisrunning ? ", combat simulator" : "", RD_RDCHRNUM(oldest));
 	}
 }
 
@@ -738,12 +788,12 @@ static void ragdollEnforceBodyLimit(void)
 static void ragdollEnforcePhysicalLimit(s32 extra)
 {
 	RD_CRASHCTX("enforcephysicallimit", -1, -1);
-	s32 limit = g_RagdollMaxPhysical > 0 ? g_RagdollMaxPhysical : RD_MAXRAGDOLLS;
+	s32 limit = ragdollMaxActive();
 	s32 count = 0;
 	s32 i;
 
 	for (i = 0; i < RD_MAXRAGDOLLS; i++) {
-		if (g_Ragdolls[i].state == RDSTATE_SIMULATING) {
+		if (g_Ragdolls[i].state == RDSTATE_SIMULATING && !g_Ragdolls[i].solid) { // (solid ones cost next to nothing)
 			count++;
 		}
 	}
@@ -754,7 +804,7 @@ static void ragdollEnforcePhysicalLimit(s32 extra)
 		for (i = 0; i < RD_MAXRAGDOLLS; i++) {
 			struct ragdoll *rd = &g_Ragdolls[i];
 
-			if (rd->state != RDSTATE_SIMULATING || rd->isplayer) {
+			if (rd->state != RDSTATE_SIMULATING || rd->isplayer || rd->solid) {
 				continue;
 			}
 
@@ -785,6 +835,163 @@ static void ragdollEnforcePhysicalLimit(s32 extra)
 		count--;
 	}
 }
+
+#define RD_AIRBORNE 15.0f // units: feet this far above the floor at death = in mid-air (no animation blend)
+#define RD_SOLID_MAXSPEED 40.0f // units/s: any part faster is still falling, collapsing or settling
+#define RD_SOLID_STILL60  18     // every part that slow for 0.3 s: lying where it is
+
+#define RD_REACTING(rd) ((rd)->blending || (rd)->powered || (rd)->reflexes || (rd)->headguard || (rd)->driven)
+
+// Lying where it is: no death reactions left and no part moving (every part
+// counts: a body buckling at the knees drops its pelvis slowly at first)
+static bool rdMpAtRest(struct ragdoll *rd)
+{
+	return !RD_REACTING(rd) && rd->restset && rd->still60 >= RD_SOLID_STILL60;
+}
+
+static void rdSetSolid(struct ragdoll *rd, const char *why)
+{
+	pdphysRagdollSetSolid(rd->handle, 1);
+	rd->solid = true;
+	sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d %s: solid now", RD_RDCHRNUM(rd), why);
+}
+
+/**
+ * MOD: combat simulator ragdolls - Resting Bodies Turn Solid: a body turns
+ * static in the physics (still collides, never moves) as soon as it's done
+ * reacting and lies still, whatever it lies on (a pile of bodies never lets
+ * it sleep). Only a moving lift or breaking glass makes it move again.
+ */
+static void rdMpSolidCheck(struct ragdoll *rd)
+{
+	f32 dt = g_Vars.lvupdate60freal / 60.0f;
+	bool moving = false;
+
+	if (!ragdollSolidEnabled()) {
+		return;
+	}
+
+	// The fastest part's speed since last tick (the player's own body too:
+	// at the respawn it can turn solid at once)
+	if (dt > 0.0f) {
+		s32 part;
+
+		if (rd->restset) {
+			f32 fastest = 0.0f;
+
+			for (part = 0; part < rd->numparts; part++) {
+				f32 d[3];
+				f32 len;
+
+				rdVecSub(rd->world[part].m[3], rd->restpos[part], d);
+				len = rdVecLen(d);
+
+				if (len > fastest) {
+					fastest = len;
+				}
+			}
+
+			rd->restspeed = fastest / dt;
+			moving = rd->restspeed > RD_SOLID_MAXSPEED;
+		}
+
+		for (part = 0; part < rd->numparts; part++) {
+			rdVecCopy(rd->world[part].m[3], rd->restpos[part]);
+		}
+
+		rd->restset = true;
+
+		// Asleep: its reactions are over (they only end while it's awake). The
+		// dead player's body keeps its death camera control.
+		if (!rd->isplayer && rd->handle >= 0 && pdphysRagdollIsAsleep(rd->handle)) {
+			rd->blending = false;
+			rd->powered = false;
+			rd->reflexes = false;
+			rd->headguard = false;
+			rd->driven = false;
+		}
+
+		if (moving || RD_REACTING(rd)) {
+			rd->still60 = 0;
+		} else {
+			rd->still60 += g_Vars.lvupdate60;
+		}
+	}
+
+	if (!rd->isplayer && !rd->grabbed && !rd->riding && !rd->fellout && rd->handle >= 0
+			&& !moving && rdMpAtRest(rd)) {
+		rdSetSolid(rd, "done reacting and lying still");
+	}
+}
+
+void ragdollUnsolid(struct ragdoll *rd, const char *why)
+{
+	if (rd->solid) {
+		pdphysRagdollSetSolid(rd->handle, 0);
+		rd->solid = false;
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d moves again (no longer solid: %s)", RD_RDCHRNUM(rd), why);
+	}
+}
+
+#ifdef PD_GRAVITY
+#define RD_FLYOUT_MARGIN 1000.0f // inverted gravity: this far above the highest room, a body has left the level
+
+/**
+ * MOD: gravity - the physics world follows Game.Gravity. When it changes,
+ * the bodies lying still (asleep, or solid in the Combat Simulator) wake up
+ * and follow it: flipped, they fall up to the ceiling. Frozen bodies (past
+ * Max Active Bodies) stay as they are.
+ */
+static void ragdollFollowGravity(void)
+{
+	static f32 lastscale = 1.0f;
+	f32 scale = gravityScale();
+	s32 i;
+
+	pdphysSetGravityScale(scale);
+
+	if (scale == lastscale) {
+		return;
+	}
+
+	lastscale = scale;
+
+	for (i = 0; i < RD_MAXRAGDOLLS; i++) {
+		struct ragdoll *rd = &g_Ragdolls[i];
+
+		if (rd->state == RDSTATE_SIMULATING && rd->handle >= 0 && !rd->fellout) {
+			ragdollUnsolid(rd, "the gravity changed");
+			pdphysRagdollKeepAwake(rd->handle, 0.5f);
+		}
+	}
+}
+
+// The top of the level's highest room (worked out once per level)
+static f32 ragdollLevelTopY(void)
+{
+	static void *rooms = NULL;
+	static s32 numrooms = -1;
+	static s32 stagenum = -1;
+	static f32 top = 0.0f;
+	s32 i;
+
+	if (rooms != (void *) g_Rooms || numrooms != g_Vars.roomcount || stagenum != g_Vars.stagenum) {
+		rooms = (void *) g_Rooms;
+		numrooms = g_Vars.roomcount;
+		stagenum = g_Vars.stagenum;
+		top = -RD_FLYOUT_MARGIN;
+
+		for (i = 1; i < numrooms; i++) {
+			if (g_Rooms[i].bbmax[1] > top) {
+				top = g_Rooms[i].bbmax[1];
+			}
+		}
+	}
+
+	return top;
+}
+#endif
+
 // A frozen body gets its physics back (a shot, a blast, a grab). False if it couldn't.
 static bool ragdollUnfreeze(struct ragdoll *rd)
 {
@@ -933,8 +1140,9 @@ void ragdollOnChrDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, stru
 
 	prop = chr->prop;
 
-	// Only real deaths of non-player humans and Skedar in solo/co-op/
-	// counter-op (or the dead player's own body, for the ragdoll death camera)
+	// Only real deaths of non-player humans and Skedar (or the dead player's
+	// own body, for the ragdoll death camera). MOD: combat simulator ragdolls -
+	// the Combat Simulator's simulants too (solo AI buddies stay as they were)
 	if (knockout
 			|| (chr->actiontype != ACT_DIE && chr != g_RagdollCreatingPlayer
 				&& !(g_RdCreatingKnockout && chr->actiontype == ACT_DRUGGEDDROP))
@@ -943,8 +1151,7 @@ void ragdollOnChrDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, stru
 			|| chr->model == NULL
 			|| chr->model->anim == NULL
 			|| ragdollSkelFor(chr->model) == NULL // (humans and Skedar)
-			|| chr->aibot != NULL
-			|| g_Vars.normmplayerisrunning
+			|| (chr->aibot != NULL && !g_Vars.normmplayerisrunning)
 			|| g_Vars.tickmode == TICKMODE_CUTSCENE
 			|| (chr->specialdie != SPECIALDIE_NONE && !g_RagdollSpecialDieEnd)) {
 		return;
@@ -1017,6 +1224,14 @@ void ragdollOnChrDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, stru
 	// No blend for a scripted death (its animation has played out), a knockout or a Deadly Punch kill
 	rd->blending = g_RagdollAnimBlend > 0 && (s32)(rngRandom() % 100) < g_RagdollAnimBlend && !g_RagdollSpecialDieEnd
 		&& !g_RdCreatingKnockout && !cheatIsDeadlyPunch(gset);
+
+	// Killed in mid-air (feet at manground, the floor at ground): no blend,
+	// or the death animation holds the body up where it was hit
+	if (rd->blending && chr->manground - chr->ground > RD_AIRBORNE) {
+		rd->blending = false;
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d killed in mid-air (%.0f above the floor): no animation blend, it falls",
+				chr->chrnum, chr->manground - chr->ground);
+	}
 	rd->powered = !rd->blending && g_RagdollMuscles && rd->musclestrength > 0.0f && !g_RagdollSpecialDieEnd;
 	rd->reflexes = rd->skel->human; // (bracing, clutching: human poses)
 	rd->headguard = rd->skel->human;
@@ -1469,6 +1684,97 @@ void ragdollOnChrYeet(struct chrdata *chr, struct coord *exppos)
 	}
 }
 
+/**
+ * MOD: ragdoll physics - hoverbike runs over. bbikeCalculateNewPositionWithPush()
+ * ran into a chr. With a real run-up (recentdist: how far the bike actually
+ * moved in the last half second; its speed alone can build up while it's
+ * held against someone) and heading at the chr, the chr is killed and
+ * knocked down ahead of the bike as a ragdoll. A friend of the player, or a
+ * slow bump, is left to the game (it blocks the bike as before). Returns
+ * true if the chr was run over (the bike may carry on).
+ */
+// Half a second near top speed (about 18.5 per 60th: 555 units)
+#define RD_BIKE_RUNOVER_DIST 450.0f
+// And heading at the chr now (per 60th)
+#define RD_BIKE_RUNOVER_CLOSING 10.0f
+
+s32 ragdollOnBikeHitChr(struct chrdata *chr, struct prop *bike, f32 speedx, f32 speedz, f32 recentdist)
+{
+	RD_CRASHCTX("onbikehitchr", RD_CHRNUM(chr), -1);
+	struct prop *playerprop = g_Vars.currentplayer ? g_Vars.currentplayer->prop : NULL;
+	struct ragdoll *rd;
+	struct coord dir;
+	f32 dx, dz, dist, closing, speed, damage;
+	f32 vel[3];
+
+	if (!g_RagdollsEnabled || !g_RagdollLevelLoaded || !pdphysIsReady()
+			|| chr == NULL || chr->prop == NULL || bike == NULL || playerprop == NULL) {
+		return false;
+	}
+
+	if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD || ragdollFindByChr(chr) != NULL) {
+		return false;
+	}
+
+	if (playerprop->chr && chrCompareTeams(playerprop->chr, chr, COMPARE_FRIENDS)) {
+		return false;
+	}
+
+	dx = chr->prop->pos.x - bike->pos.x;
+	dz = chr->prop->pos.z - bike->pos.z;
+	dist = sqrtf(dx * dx + dz * dz);
+
+	if (dist < 1.0f) {
+		dist = 1.0f;
+	}
+
+	closing = (speedx * dx + speedz * dz) / dist;
+	speed = sqrtf(speedx * speedx + speedz * speedz);
+
+	if (recentdist < RD_BIKE_RUNOVER_DIST || closing < RD_BIKE_RUNOVER_CLOSING || speed < 0.01f) {
+		return false;
+	}
+
+	dir.x = speedx / speed;
+	dir.y = 0.0f;
+	dir.z = speedz / speed;
+
+	// Enough to kill through any shield or armour
+	damage = chr->maxdamage - chr->damage + chr->cshield + 1.0f;
+
+	if (damage < 1.0f) {
+		damage = 1.0f;
+	}
+
+	chrDamageByMisc(chr, damage, &dir, NULL, playerprop);
+
+	if (chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD) {
+		return false; // (invincible)
+	}
+
+	rd = ragdollFindByChr(chr);
+
+	if (rd && rd->state == RDSTATE_SIMULATING && ragdollUnfreeze(rd)) {
+		// Half the bike's speed: knocked down a few steps ahead, not sent
+		// flying
+		f32 hspeed = speed * 60.0f * 0.5f;
+
+		RD_CLAMPHI(hspeed, 600.0f);
+
+		// Thrown ahead of the bike and up off its feet, all at once (no
+		// death animation blend: it's knocked flat)
+		rd->blending = false;
+		rd->stumble = false;
+		rdVecSet(vel, dir.x * hspeed, 100.0f + hspeed * 0.2f, dir.z * hspeed);
+		pdphysRagdollAddVelocity(rd->handle, -1, vel);
+	}
+
+	sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d run over by the hoverbike at %.1f (speed %.1f, moved %.0f in the last half second)%s",
+			chr->chrnum, closing, speed, recentdist, rd ? "" : ", no ragdoll");
+
+	return true;
+}
+
 s32 ragdollWakeFrozen(struct ragdoll *rd)
 {
 	RD_CRASHCTX("wakefrozen", RD_RDCHRNUM(rd), -1);
@@ -1496,6 +1802,16 @@ static void ragdollLogSettled(struct ragdoll *rd)
 	s32 tries;
 
 	rdCoordToVec(&rd->prop->pos, from);
+
+#ifdef PD_GRAVITY
+	// MOD: gravity - inverted, it rests against a ceiling: no floor checks
+	if (gravityScale() < 0.0f) {
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d settled after %.1f s at (%.0f, %.0f, %.0f) with inverted gravity%s",
+				RD_RDCHRNUM(rd), rd->age60 / 60.0f, from[0], from[1], from[2], timeout);
+		return;
+	}
+#endif
+
 	rdVecSet(to, from[0], from[1] + 25.0f, from[2]);
 
 	if (pdphysRaycast(from, to, hit, normal, &hitroom) && fabsf(normal[1]) > 0.7f) {
@@ -1669,6 +1985,9 @@ static void ragdollTickAll(void)
 
 	{
 		RD_CRASHCTX("physicsstep", -1, -1);
+#ifdef PD_GRAVITY
+		ragdollFollowGravity(); // MOD: gravity
+#endif
 		pdphysStep(dt);
 	}
 
@@ -1687,6 +2006,14 @@ static void ragdollTickAll(void)
 		rd->age60 += g_Vars.lvupdate60;
 		ragdollCheckSeen(rd);
 
+		// MOD: combat simulator ragdolls - a solid body doesn't move (on the
+		// tick it turns solid, its pose is read once more below)
+		if (rd->solid) {
+			continue;
+		}
+
+		rdMpSolidCheck(rd);
+
 		// Still asleep after the step: the pose hasn't changed
 		if (rd->sleeping && pdphysRagdollIsAsleep(rd->handle)) {
 			continue;
@@ -1702,6 +2029,18 @@ static void ragdollTickAll(void)
 				memcpy(&rd->world[part], joints[b], sizeof(Mtxf));
 			}
 		}
+
+#ifdef PD_GRAVITY
+		// MOD: gravity - inverted, a body can fly out of the top of the level
+		if (gravityScale() < 0.0f && rd->world[0].m[3][1] > ragdollLevelTopY() + RD_FLYOUT_MARGIN) {
+			sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d%s flew out of the top of the level (pelvis y %.0f), stopping it%s",
+					RD_RDCHRNUM(rd), rd->isplayer ? " (player)" : "", rd->world[0].m[3][1],
+					rd->isplayer ? "" : " and removing the corpse");
+			rd->fellout = true;
+			ragdollFreeze(rd);
+			continue;
+		}
+#endif
 
 		// Fell out of the level: stop it for good (the corpse fades out once
 		// the game has made it ACT_DEAD, see the release loop)
@@ -1761,7 +2100,7 @@ static void ragdollTickAll(void)
 
 s32 ragdollGetExtraChrSlots(void)
 {
-	return (g_RagdollsEnabled && !g_Vars.normmplayerisrunning) ? RD_EXTRACHRSLOTS : 0;
+	return g_RagdollsEnabled ? RD_EXTRACHRSLOTS : 0;
 }
 
 bool ragdollIsChrRagdolled(struct chrdata *chr)
@@ -1772,7 +2111,232 @@ bool ragdollIsChrRagdolled(struct chrdata *chr)
 bool ragdollIsChrSettled(struct chrdata *chr)
 {
 	struct ragdoll *rd = ragdollFindByChr(chr);
-	return rd && (rd->settled || rd->state == RDSTATE_FROZEN);
+
+	// MOD: combat simulator ragdolls - nor does a simulant's respawn wait for its body
+	return rd && (rd->settled || rd->state == RDSTATE_FROZEN || (chr->aibot && rd->age60 >= RD_MPBOTDEAD60));
+}
+
+/**
+ * MOD: combat simulator ragdolls - chrDie: a simulant dies. Simulants skip
+ * chrBeginDeath (which makes the guards' ragdolls) and get no death
+ * animation: start one of the game's for the blend, as the player's body
+ * does, and make the ragdoll.
+ */
+void ragdollOnBotDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, struct gset *gset)
+{
+	RD_CRASHCTX("botdeath", RD_CHRNUM(chr), hitpart);
+	s32 num = 0;
+
+	if (!g_RagdollsEnabled || !g_Vars.normmplayerisrunning || chr == NULL || chr->aibot == NULL
+			|| chr->actiontype != ACT_DIE || chr->model == NULL || chr->model->anim == NULL
+			|| ragdollSkelFor(chr->model) == NULL || ragdollFindByChr(chr) != NULL) {
+		return;
+	}
+
+	while (g_DeathAnimations[num] != 0) {
+		num++;
+	}
+
+	if (num > 0) {
+		s32 pick = (s32)rdRollRange(0.0f, (f32)num - 0.01f);
+
+		modelSetAnimation(chr->model, g_DeathAnimations[pick], rdRollRange(0.0f, 1.0f) < 0.5f, 0, 0.5f, 0);
+	}
+
+	ragdollOnChrDeath(chr, dir, hitpart, gset, false);
+
+	if (ragdollFindByChr(chr)) {
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: combat simulator: simulant chr %d died, its body is a ragdoll", chr->chrnum);
+	}
+}
+
+// MOD: combat simulator ragdolls - chrTickDead: a simulant's body doesn't
+// fade during its respawn countdown (it stays)
+bool ragdollMpKeepsBody(struct chrdata *chr)
+{
+	return g_Vars.normmplayerisrunning && g_RagdollMpMaxBodies >= 0 && chr->aibot && ragdollFindByChr(chr) != NULL;
+}
+
+/**
+ * MOD: combat simulator ragdolls - a player or simulant respawns into its old
+ * chr and model. The body stays where it fell: the model (pose, cuts and
+ * ragdoll) moves to a new corpse chr, and the combatant gets a fresh model of
+ * the same body and head. False if it couldn't (no chr slot or memory).
+ */
+static bool rdHandOffBody(struct ragdoll *rd, struct player *player)
+{
+	struct chrdata *chr = rd->chr;
+	struct model *old = rd->model;
+	struct modeldef *headdef = NULL;
+	struct model *fresh;
+	struct prop *corpseprop;
+	struct chrdata *corpse;
+	struct coord pos;
+	RoomNum rooms[8];
+
+	if (old == NULL || chr->model != old || chr->prop == NULL || chrsGetNumFree() < 2) {
+		return false;
+	}
+
+	// The head it wears (the Combat Simulator loads one per player): the
+	// fresh model shares it
+	if (old->definition->skel == &g_SkelChr) {
+		struct modelnode *node = modelGetPart(old->definition, MODELPART_CHR_HEADSPOT);
+
+		if (node) {
+			union modelrwdata *rw = modelGetNodeRwData(old, node);
+			headdef = rw ? rw->headspot.headmodeldef : NULL;
+		}
+	}
+
+	if (chr->headnum > 0 && headdef == NULL && !g_HeadsAndBodies[chr->bodynum].unk00_01) {
+		return false;
+	}
+
+	fresh = body0f02ce8c(chr->bodynum, chr->headnum, old->definition, headdef, false, NULL, player != NULL, false);
+
+	if (fresh == NULL) {
+		return false;
+	}
+
+	modelSetScale(fresh, old->scale);
+
+	// The animation and root state carry over as on a reused model (an empty
+	// animation state hung the game when the simulant next ticked)
+	if (old->anim && fresh->anim) {
+		*fresh->anim = *old->anim;
+	}
+
+	if (old->definition->rootnode && (old->definition->rootnode->type & 0xff) == MODELNODETYPE_CHRINFO) {
+		union modelrwdata *from = modelGetNodeRwData(old, old->definition->rootnode);
+		union modelrwdata *to = modelGetNodeRwData(fresh, fresh->definition->rootnode);
+
+		if (from && to) {
+			to->chrinfo = from->chrinfo;
+		}
+	}
+
+	// The corpse: a plain dead chr with the old model
+	rdVecToCoord(rd->world[0].m[3], &pos);
+	roomsCopy(rd->isplayer ? rd->playerbaserooms : chr->prop->rooms, rooms);
+
+	// chrAllocate resets the model's root, turn and animation speed. A body
+	// still following its death animation would lurch towards the moved
+	// animation: keep both as they were.
+	{
+		struct anim savedanim;
+		struct modelrwdata_chrinfo savedroot;
+		union modelrwdata *root = NULL;
+
+		if (old->anim) {
+			savedanim = *old->anim;
+		}
+
+		if (old->definition->rootnode && (old->definition->rootnode->type & 0xff) == MODELNODETYPE_CHRINFO) {
+			root = modelGetNodeRwData(old, old->definition->rootnode);
+		}
+
+		if (root) {
+			savedroot = root->chrinfo;
+		}
+
+		corpseprop = chrAllocate(old, &pos, rooms, 0, NULL);
+
+		if (old->anim) {
+			*old->anim = savedanim;
+		}
+
+		if (root) {
+			root->chrinfo = savedroot;
+		}
+	}
+
+	if (corpseprop == NULL || corpseprop->chr == NULL) {
+		old->chr = chr;
+		modelmgrFreeModel(fresh);
+		return false;
+	}
+
+	corpse = corpseprop->chr;
+	propActivateThisFrame(corpseprop);
+	propEnable(corpseprop);
+
+	corpse->headnum = chr->headnum;
+	corpse->bodynum = chr->bodynum;
+	corpse->race = chr->race;
+	corpse->flags = 0;
+	corpse->flags2 = 0;
+	corpse->hidden2 |= CHRH2FLAG_SPAWNED;
+	corpse->noblood = chr->noblood;
+	corpse->team = chr->team; // the team highlight stays as it was
+
+	// And its lighting (a new chr starts lit white: it flashed)
+	memcpy(corpse->shadecol, chr->shadecol, sizeof(corpse->shadecol));
+	memcpy(corpse->nextcol, chr->nextcol, sizeof(corpse->nextcol));
+	corpse->floorcol = chr->floorcol;
+	corpse->floortype = chr->floortype;
+	corpse->floorroom = chr->floorroom;
+	corpse->ailist = NULL;
+	chrBeginDead(corpse);
+
+	corpseprop->pos = pos;
+	corpseprop->flags |= PROPFLAG_RENDERPOSTBG;
+
+	// The player or simulant: the fresh model, set up as the chr code does
+	modelSetAnim70(fresh, chr0f01f378);
+	fresh->chr = chr;
+	fresh->unk01 = 1;
+	modelSetAnimPlaySpeed(fresh, PALUPF(var80062968), 0);
+	modelSetRootPosition(fresh, &chr->prop->pos);
+	chr->model = fresh;
+	chr->prop->flags &= ~PROPFLAG_RENDERPOSTBG;
+
+	// No matrices until it's drawn: not on screen until then (the shot and aim
+	// checks read them)
+	fresh->matrices = NULL;
+	chr->prop->flags &= ~PROPFLAG_ONTHISSCREENTHISTICK;
+
+	if (player) {
+		player->model00d4 = fresh;
+	}
+
+	// The ragdoll goes with the body
+	rd->chr = corpse;
+	rd->prop = corpseprop;
+	rd->isplayer = false;
+	rd->playernum = -1;
+	ragdollUpdateBodyRooms(rd);
+	ragdollUpdateFloor(rd);
+	g_RagdollChangeSerial++;
+
+	// Already lying still: solid at once (asleep counts, whatever reactions
+	// or the death camera held: letting go of those now moved the torso)
+	if (ragdollSolidEnabled() && rd->state == RDSTATE_SIMULATING && rd->handle >= 0 && !rd->grabbed && !rd->riding
+			&& !rd->fellout && ((rdMpAtRest(rd) && rd->restspeed <= RD_SOLID_MAXSPEED) || pdphysRagdollIsAsleep(rd->handle))) {
+		rdSetSolid(rd, "was lying still at its respawn");
+	}
+
+	sysLogPrintf(LOG_NOTE, "RAGDOLL: combat simulator: chr %d respawns, its body stays (now chr %d)", chr->chrnum, corpse->chrnum);
+	return true;
+}
+
+// MOD: combat simulator ragdolls - playerStartNewLife / botSpawn: the body
+// stays (true) or goes (Max Bodies on Vanilla)
+bool ragdollOnCombatantRespawn(struct chrdata *chr, struct player *player)
+{
+	RD_CRASHCTX("respawn", RD_CHRNUM(chr), -1);
+	struct ragdoll *rd = ragdollFindByChr(chr);
+
+	if (rd == NULL) {
+		return false;
+	}
+
+	if (g_Vars.normmplayerisrunning && g_RagdollMpMaxBodies >= 0 && rdHandOffBody(rd, player)) {
+		return true;
+	}
+
+	ragdollRelease(rd);
+	return false;
 }
 
 void ragdollOnChrRemoved(struct chrdata *chr)
@@ -1854,7 +2418,26 @@ bool ragdollUpdateNodeMtx(struct modelrenderdata *renderdata, struct model *mode
 			return false; // not a part (fingers, toes, the Skedar's tail tip): the animation's, from its part
 		}
 
-		modelPositionJointUsingQuatRot(renderdata, model, node, rd->localquat[part], &rd->renderpos[part], &one);
+		// The DK Mode cheat's big head and arms: the chr renderer's joint hook
+		// (chrHandleJointPositioned) scales them, but it's left out below, so
+		// bodies went back to normal when they died. Same joints, same scale
+		// (the body's joints and shapes match it: rdDkSpread).
+		if (rd->dk) {
+			s32 joint = node->rodata->position.mtxindex0;
+			f32 dk = joint == 0 ? RD_DK_HEADSCALE : (joint == 2 || joint == 3) ? RD_DK_ARMSCALE : 1.0f;
+
+			one.x = one.y = one.z = dk;
+		}
+
+		// The physics pose as it is, without the chr renderer's aiming hook
+		// (it twisted the waist, shoulders and neck by the chr's aim)
+		{
+			void (*jointfunc)(s32 mtxindex, Mtxf *mtx) = g_ModelJointPositionedFunc;
+
+			g_ModelJointPositionedFunc = NULL;
+			modelPositionJointUsingQuatRot(renderdata, model, node, rd->localquat[part], &rd->renderpos[part], &one);
+			g_ModelJointPositionedFunc = jointfunc;
+		}
 
 		if (part == 2 && ragdollHideHeadForViewer(rd)) {
 			Mtxf *m = &model->matrices[node->rodata->position.mtxindex0];
@@ -1944,11 +2527,19 @@ void ragdollOnWitnessDeath(struct chrdata *guard, struct chrdata *victim) {}
 s32 ragdollBodyBlocksShot(struct chrdata *shooter, struct prop *targetprop, struct coord *gunpos,
 		struct coord *aimpos, struct coord *dir, struct gset *gset, struct coord *outhit) { return false; }
 bool ragdollIsChrSettled(struct chrdata *chr) { return false; }
+bool ragdollMpKeepsBody(struct chrdata *chr) { return false; }
+s32 ragdollMaxActive(void) { return RD_MAXBODIES_LIMIT; }
+bool ragdollBodiesVanilla(void) { return false; }
+bool ragdollSolidEnabled(void) { return false; }
+void ragdollOnBotDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, struct gset *gset) {}
+void ragdollOnGlassBroken(struct prop *prop) {}
+bool ragdollOnCombatantRespawn(struct chrdata *chr, struct player *player) { return false; }
 void ragdollOnChrRemoved(struct chrdata *chr) {}
 void ragdollOnChrShot(struct chrdata *chr, s32 hitpart, struct coord *dir, struct gset *gset) {}
 s32 ragdollGetExtraChrSlots(void) { return 0; }
 void ragdollOnExplosion(struct chrdata *chr, struct coord *centre, f32 radius, f32 damage) {}
 void ragdollOnChrYeet(struct chrdata *chr, struct coord *exppos) {}
+s32 ragdollOnBikeHitChr(struct chrdata *chr, struct prop *bike, f32 speedx, f32 speedz, f32 recentdist) { return false; }
 s32 ragdollOnSpecialDieEnd(struct chrdata *chr) { return false; }
 Gfx *ragdollRenderCaps(Gfx *gdl, struct chrdata *chr) { return gdl; }
 s32 ragdollIsAnyPieceOnScreen(struct chrdata *chr, f32 size) { return false; }
@@ -2028,6 +2619,12 @@ s32 ragdollPresetGet(void)
 		}
 	}
 
+#ifdef PD_GRAVITY
+	if (!gravityIsDefault()) {
+		return RD_PRESET_CUSTOM; // MOD: gravity (in the Physics menu too)
+	}
+#endif
+
 	return RD_PRESET_DEFAULT;
 }
 
@@ -2048,6 +2645,10 @@ void ragdollPresetApply(s32 preset)
 			*(s32 *)v->ptr = (s32)v->def;
 		}
 	}
+
+#ifdef PD_GRAVITY
+	gravityResetDefaults(); // MOD: gravity
+#endif
 }
 
 PD_CONSTRUCTOR static void ragdollConfigInit(void)
@@ -2055,8 +2656,11 @@ PD_CONSTRUCTOR static void ragdollConfigInit(void)
 	configRegisterInt("Ragdoll.Ragdolls", &g_RagdollsEnabled, 0, 1);
 	RD_PRESET_FLOAT("Ragdoll.RagdollPushScale", &g_RagdollPushScale, 0.0f, 10.0f);
 	configRegisterInt("Ragdoll.RagdollTestSpawnKey", &g_RagdollTestSpawnKey, 0, 1);
-	RD_PRESET_INT("Ragdoll.RagdollMaxBodies", &g_RagdollMaxBodies, 0, RD_MAXBODIES_LIMIT);
+	configRegisterInt("Ragdoll.RagdollMpSolid", &g_RagdollMpSolid, RD_SOLID_OFF, RD_SOLID_BOTH); // MOD: combat simulator ragdolls
+	RD_PRESET_INT("Ragdoll.RagdollMaxBodies", &g_RagdollMaxBodies, -1, RD_MAXBODIES_LIMIT);
 	RD_PRESET_INT("Ragdoll.RagdollMaxPhysical", &g_RagdollMaxPhysical, 0, RD_MAXBODIES_LIMIT);
+	RD_PRESET_INT("Ragdoll.RagdollMpMaxBodies", &g_RagdollMpMaxBodies, -1, RD_MAXBODIES_LIMIT); // MOD: combat simulator ragdolls
+	RD_PRESET_INT("Ragdoll.RagdollMpMaxPhysical", &g_RagdollMpMaxPhysical, 0, RD_MAXBODIES_LIMIT);
 	RD_PRESET_INT("Ragdoll.RagdollChrPush", &g_RagdollChrPush, 0, 1);
 	RD_PRESET_INT("Ragdoll.RagdollGrab", &g_RagdollGrab, 0, 1);
 	RD_PRESET_FLOAT("Ragdoll.RagdollGrabStrength", &g_RagdollGrabStrength, 0.25f, 4.0f);

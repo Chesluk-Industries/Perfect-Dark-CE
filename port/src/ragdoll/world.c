@@ -7,6 +7,9 @@
 #include "rd_internal.h"
 #include "lib/snd.h"
 #include "game/file.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 #ifdef PD_PHYSICS
 
@@ -566,6 +569,15 @@ void ragdollCheckScream(struct ragdoll *rd, f32 dt)
 	rd->screamprevset = true;
 	speed = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / dt;
 
+#ifdef PD_GRAVITY
+	// MOD: gravity - below the original gravity bodies float slowly through
+	// the air: no screaming
+	if (gravityScale() < 1.0f) {
+		rd->screamair = 0.0f;
+		return;
+	}
+
+#endif
 	// Who screams: not the player, nor a body that came to rest more than
 	// 2 s before it was sent flying (unless knocked out), nor one without a
 	// head; not while it's following its death animation (the air time only

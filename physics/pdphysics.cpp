@@ -658,6 +658,7 @@ struct Ragdoll {
 	float partRadius[PDPHYS_MAX_RAGDOLL_PARTS];  // metres
 	struct OverlapPair { int a, b; float time; bool cut; }; // cut: a cut piece and the rest (see pdphysRagdollDetach)
 	std::vector<OverlapPair> overlapPairs;       // parts that overlapped at death, collision off until they come apart
+	bool solid = false;     // MOD: combat simulator ragdolls - static (pdphysRagdollSetSolid): collides, never moves or wakes
 };
 
 constexpr int kMaxRagdolls = 256;
@@ -666,6 +667,12 @@ Ragdoll g_Ragdolls[kMaxRagdolls];
 static bool ragdollLive(int handle)
 {
 	return handle >= 0 && handle < kMaxRagdolls && g_Ragdolls[handle].used;
+}
+
+// MOD: combat simulator ragdolls - live and not solid: can be pushed, driven and woken
+static bool ragdollMovable(int handle)
+{
+	return ragdollLive(handle) && !g_Ragdolls[handle].solid;
 }
 int g_UnstraddleCount = 0; // parts put back on their parent's side of a wall (unstraddleWalls)
 
@@ -1185,16 +1192,21 @@ static const RoomSet &ragdollRoomsUnion()
 	return g_RagdollRoomsUnion;
 }
 
+// MOD: gravity - rooms of pdphysRaycastRagdollWorldRooms (handle -3)
+static RoomSet g_ListRooms;
+
 class RagdollWorldBodyFilter final : public BodyFilter {
 public:
 	// handle: the ragdoll the query is for (its rooms only), -1 for the
-	// rooms of all ragdolls, -2 for any room
+	// rooms of all ragdolls, -2 for any room, -3 for the rooms of g_ListRooms
 	explicit RagdollWorldBodyFilter(int handle = -1) : mHandle(handle) {}
 
 	bool ShouldCollideLocked(const Body &body) const override
 	{
 		if (body.GetObjectLayer() != Layers::STATIC && body.GetObjectLayer() != Layers::QUERY) {
-			return true;
+			// MOD: gravity - item checks (-3) are against the level only: the
+			// game's own collision handles props (doors, characters)
+			return mHandle != -3;
 		}
 
 		// Rooms drawn in the same space but not shown from here (overlapping
@@ -1204,6 +1216,9 @@ public:
 				return false;
 			}
 		} else if (mHandle == -1 && !ragdollRoomsUnion().Allows(body.GetUserData())) {
+			return false;
+		} else if (mHandle == -3 && !g_ListRooms.Allows(body.GetUserData())) {
+			// MOD: gravity - the rooms of pdphysRaycastRagdollWorldRooms
 			return false;
 		}
 
@@ -1370,108 +1385,6 @@ extern "C" int pdphysSweepCapsuleContacts(const float from[3], const float to[3]
 	return n;
 }
 
-// MOD: clipping checks - a vertical capsule swept against level groups
-extern "C" int pdphysSweepCapsuleLevelGroups(const float from[3], const float to[3], float radius, float halfheight,
-		unsigned int groupmask, float maxnormaly, float minnormaly, unsigned int covermask, float coverdist,
-		float *outfraction, float outnormal[3])
-{
-	if (!g_World || radius <= 0.0f) {
-		return 0;
-	}
-
-	Vec3 dir(toMetres(to[0] - from[0]), toMetres(to[1] - from[1]), toMetres(to[2] - from[2]));
-	float dirlen = dir.Length();
-
-	if (dirlen < 1.0e-6f) {
-		return 0;
-	}
-
-	RefConst<Shape> shape;
-
-	if (halfheight > 0.5f) {
-		shape = new CapsuleShape(toMetres(halfheight), toMetres(radius));
-	} else {
-		shape = new SphereShape(toMetres(radius));
-	}
-
-	RShapeCast cast(shape, Vec3::sReplicate(1.0f),
-			RMat44::sTranslation(RVec3(vecFromUnits(from))), dir);
-	ShapeCastSettings settings;
-	settings.mBackFaceModeTriangles = EBackFaceMode::CollideWithBackFaces;
-	settings.mBackFaceModeConvex = EBackFaceMode::CollideWithBackFaces;
-	AllHitCollisionCollector<CastShapeCollector> collector;
-	LevelOnlyBPFilter bpfilter;
-	LevelAndQueryObjectFilter objfilter;
-	LevelGroupBodyFilter bodyfilter(groupmask);
-
-	g_World->system.GetNarrowPhaseQuery().CastShape(cast, settings, RVec3::sZero(), collector, bpfilter, objfilter, bodyfilter);
-
-	float best = 2.0f;
-	Vec3 bestn = Vec3::sZero();
-	Vec3 dirn = dir / dirlen;
-
-	for (const ShapeCastResult &hit : collector.mHits) {
-		Vec3 axis = hit.mPenetrationAxis;
-
-		if (axis.LengthSq() < 1.0e-12f) {
-			continue;
-		}
-
-		Vec3 n = -axis.Normalized();
-
-		// Floors to stand on and flat ceilings are handled elsewhere
-		if (n.GetY() >= maxnormaly || n.GetY() <= minnormaly) {
-			continue;
-		}
-
-		// Only surfaces the move goes into (sliding along or moving away is fine)
-		Vec3 nh(n.GetX(), 0.0f, n.GetZ());
-
-		if (nh.LengthSq() < 1.0e-6f || dirn.Dot(nh.Normalized()) > -0.05f) {
-			continue;
-		}
-
-		if (hit.mFraction >= best) {
-			continue;
-		}
-
-		// Covered by other geometry (the game's own collision) right at it:
-		// that geometry decides, not this surface
-		if (covermask && coverdist > 0.0f) {
-			Vec3 p(hit.mContactPointOn2);
-			Vec3 span = n * toMetres(coverdist);
-			RRayCast ray(RVec3(p + span), -2.0f * span);
-			RayCastResult coverhit;
-			LevelOnlyBPFilter coverbp;
-			LevelAndQueryObjectFilter coverobj;
-			LevelGroupBodyFilter coverbody(covermask);
-
-			if (g_World->system.GetNarrowPhaseQuery().CastRay(ray, coverhit, coverbp, coverobj, coverbody)) {
-				continue;
-			}
-		}
-
-		{
-			best = hit.mFraction;
-			bestn = nh.Normalized();
-		}
-	}
-
-	if (best > 1.0f) {
-		return 0;
-	}
-
-	if (outfraction) {
-		*outfraction = best;
-	}
-
-	if (outnormal) {
-		storeVec(bestn, outnormal);
-	}
-
-	return 1;
-}
-
 static int raycastRagdollWorld(const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom, int handle);
 
 extern "C" int pdphysRaycast(const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom)
@@ -1482,6 +1395,15 @@ extern "C" int pdphysRaycast(const float from[3], const float to[3], float outhi
 extern "C" int pdphysRaycastAnyRoom(const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom)
 {
 	return raycastRagdollWorld(from, to, outhit, outnormal, outroom, -2);
+}
+
+// MOD: gravity - the level as ragdolls see it (level surfaces only, no
+// props), in the given rooms
+extern "C" int pdphysRaycastRagdollWorldRooms(const int *rooms, int num, const float from[3], const float to[3], float outhit[3], float outnormal[3], int *outroom)
+{
+	g_ListRooms.Set(rooms, num > 0 ? num : -1);
+
+	return raycastRagdollWorld(from, to, outhit, outnormal, outroom, -3);
 }
 
 // The level as one ragdoll sees it: only the rooms it collides with
@@ -1713,6 +1635,7 @@ extern "C" int pdphysRagdollCreate(const pdphysRagdollPart *parts, int numparts)
 	BodyInterface &bi = g_World->system.GetBodyInterface();
 
 	rd.used = true;
+	rd.solid = false;
 	rd.numparts = numparts;
 	g_RagdollRooms[handle].enabled = false; // no room filter until told (pdphysRagdollSetRooms)
 	g_RagdollRoomsUnionDirty = true;
@@ -1921,7 +1844,7 @@ extern "C" void pdphysRagdollDestroy(int handle)
 
 extern "C" void pdphysRagdollAddVelocity(int handle, int part, const float vel[3])
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -1944,7 +1867,7 @@ extern "C" void pdphysRagdollAddVelocity(int handle, int part, const float vel[3
 // blend while it was pulling them)
 extern "C" void pdphysRagdollClampSpeed(int handle, const float ref[3], float maxspeed)
 {
-	if (!g_World || !ragdollLive(handle) || maxspeed <= 0.0f) {
+	if (!g_World || !ragdollMovable(handle) || maxspeed <= 0.0f) {
 		return;
 	}
 
@@ -1964,7 +1887,7 @@ extern "C" void pdphysRagdollClampSpeed(int handle, const float ref[3], float ma
 
 extern "C" void pdphysRagdollPull(int handle, int part, const float target[3], float maxforce, float frequency)
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -2068,7 +1991,7 @@ extern "C" int pdphysRagdollGetJoints(int handle, float (*outmtx)[16])
 // N*m; 0 switches that joint's motor off (back to plain friction).
 extern "C" void pdphysRagdollDriveToPose(int handle, const float (*targetjointmtx)[16], const float *torques, float frequency)
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -2154,7 +2077,7 @@ extern "C" void pdphysRagdollDriveToPose(int handle, const float (*targetjointmt
 // animation (while still colliding). skip[i] != 0 leaves part i alone.
 extern "C" void pdphysRagdollTrackPose(int handle, const float (*targetjointmtx)[16], const int *skip, float weight, float dt, float reach)
 {
-	if (!g_World || !ragdollLive(handle) || dt <= 0.0f) {
+	if (!g_World || !ragdollMovable(handle) || dt <= 0.0f) {
 		return;
 	}
 
@@ -2259,7 +2182,7 @@ extern "C" void pdphysRagdollTrackPose(int handle, const float (*targetjointmtx)
 // part (and everything attached to it) becomes a separate piece.
 extern "C" void pdphysRagdollDetach(int handle, int part)
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -2419,7 +2342,7 @@ extern "C" void pdphysPropSetNoBlock(int handle, int noblock)
 // Water around the ragdoll: its surface height (PD units), or inwater 0
 extern "C" void pdphysRagdollSetWater(int handle, int inwater, float surfacey)
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -2452,10 +2375,43 @@ extern "C" void pdphysRagdollSetFriction(int handle, float friction)
 	}
 }
 
+// MOD: combat simulator ragdolls - a resting body's parts turn static (still
+// colliding, no longer simulated, woken or pushed), or dynamic again (asleep)
+extern "C" void pdphysRagdollSetSolid(int handle, int solid)
+{
+	if (!g_World || !ragdollLive(handle)) {
+		return;
+	}
+
+	Ragdoll &rd = g_Ragdolls[handle];
+
+	if (rd.solid == (solid != 0)) {
+		return;
+	}
+
+	BodyInterface &bi = g_World->system.GetBodyInterface();
+
+	rd.solid = solid != 0;
+
+	for (int i = 0; i < rd.numparts; i++) {
+		bi.SetMotionType(rd.bodies[i], rd.solid ? EMotionType::Static : EMotionType::Dynamic, EActivation::DontActivate);
+	}
+
+	for (auto &c : rd.constraints) {
+		c->SetEnabled(!rd.solid);
+	}
+
+	if (rd.solid) {
+		rd.keepAwake = 0.0f;
+		rd.inWater = false;
+		rd.motorsOn = false;
+	}
+}
+
 // Keeps every part of the ragdoll awake (no sleeping) for this many seconds
 extern "C" void pdphysRagdollKeepAwake(int handle, float seconds)
 {
-	if (!g_World || !ragdollLive(handle)) {
+	if (!g_World || !ragdollMovable(handle)) {
 		return;
 	}
 
@@ -2558,7 +2514,7 @@ void unblockOverlaps(float dt)
 	for (int h = 0; h < kMaxRagdolls; h++) {
 		Ragdoll &rd = g_Ragdolls[h];
 
-		if (!rd.used || rd.overlapPairs.empty() || !rd.filter) {
+		if (!rd.used || rd.solid || rd.overlapPairs.empty() || !rd.filter) {
 			continue;
 		}
 
@@ -2728,6 +2684,20 @@ void unstraddleWalls()
 
 } // namespace
 
+// MOD: gravity - Game.Gravity (port/src/gravity.c) scales the world's gravity
+extern "C" void pdphysSetGravityScale(float scale)
+{
+	if (!g_World) {
+		return;
+	}
+
+	Vec3 g(0.0f, -9.81f * scale, 0.0f);
+
+	if (g != g_World->system.GetGravity()) {
+		g_World->system.SetGravity(g);
+	}
+}
+
 extern "C" void pdphysStep(float dt)
 {
 	if (!g_World || dt <= 0.0f) {
@@ -2754,7 +2724,7 @@ extern "C" void pdphysStep(float dt)
 		for (int h = 0; h < kMaxRagdolls; h++) {
 			Ragdoll &rd = g_Ragdolls[h];
 
-			if (!rd.used || rd.keepAwake <= 0.0f) {
+			if (!rd.used || rd.solid || rd.keepAwake <= 0.0f) {
 				continue;
 			}
 
@@ -2771,12 +2741,12 @@ extern "C" void pdphysStep(float dt)
 	// nearly as buoyant, all slowed down by it
 	{
 		BodyInterface &bi = g_World->system.GetBodyInterface();
-		const float g = 9.81f;
+		const float g = -g_World->system.GetGravity().GetY(); // MOD: gravity (9.81 at the original)
 
 		for (int h = 0; h < kMaxRagdolls; h++) {
 			Ragdoll &rd = g_Ragdolls[h];
 
-			if (!rd.used || !rd.inWater) {
+			if (!rd.used || rd.solid || !rd.inWater) {
 				continue;
 			}
 

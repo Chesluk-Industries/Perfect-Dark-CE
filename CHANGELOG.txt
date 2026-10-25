@@ -2,6 +2,134 @@ Perfect Dark PC port - ragdoll physics build
 Changes since 1.0
 =================
 
+COMBAT SIMULATOR
+  - Ragdolls for players and simulants, with the Immersive Death Camera
+    and dismemberment. Bodies can't be grabbed there. The Ragdolls setting
+    switches all of this off, as in single player.
+  - Bodies stay where they fell when their player or simulant respawns.
+    The Combat Simulator has its own Max Bodies and Max Active Bodies
+    (Options > Extended > Physics > Performance), 32 each by default. Max
+    Bodies on Vanilla makes the body disappear on respawn, as in the
+    original.
+  - Bodies turn solid once their death reactions end and they lie still:
+    other bodies land on them and shots hit them, but nothing moves them
+    any more, which frees the physics for the bodies still moving
+    (Resting Bodies Turn Solid, same menu: Combat Simulator, Both or Off).
+    Doors pass through solid bodies; only a moving lift or glass breaking
+    under one makes it move again.
+  - Players' bodies can lose their head or a limb, or be split in half by
+    the FarSight, like everyone else's (shots at players don't say where
+    they hit, so a place on the body is picked). Beheaded, the death
+    camera goes with the head.
+  - A player's body no longer starts in the air or under the floor (it
+    was placed at the height the player started the match at), and no
+    longer jumps up or down at the start of its death.
+  - Fixed a crash when a player or simulant respawned and left their body
+    behind, if they had been in view that frame.
+  - Fixed a crash with hundreds of bodies about: a room's list of what's in
+    it overflowed. Rooms also have space for many more things now.
+
+RAGDOLLS
+  - Paintball Mode: the cut ends of dismembered bodies are filled with
+    paint colours (red, green, blue or a mix, the same at both ends of a
+    cut) instead of red, and spray paint instead of blood.
+  - With both legs cut off, some models were left with a gap in the
+    pelvis between the two cut ends: it's filled as one now.
+  - Characters killed in mid-air fall as ragdolls straight away, instead
+    of hanging in the air while their death animation plays.
+  - Bodies lying on glass (or frozen there) fall when it breaks.
+  - Guards spawned during a mission have room for up to 256 bodies, so
+    their bodies no longer get cleared early to make room for new guards.
+  - The hoverbike runs enemies over when it hits them after a run-up at
+    close to its top speed (it has to have really covered the ground:
+    revving against someone doesn't count): they're killed and knocked
+    down a few steps ahead of it as ragdolls, and the bike carries on.
+    Slower bumps, friendly characters and games with ragdolls off work as
+    before.
+
+PHYSICS MENU
+  - The Combat Simulator's More Options has a Physics shortcut: the whole
+    Physics menu (gravity included) without leaving the match setup.
+  - Reorganised: Ragdolls sits right below Preset; Push Strength moved to
+    Ragdoll Interactions (above Grab Strength); the body limits are in a
+    new Performance menu, with separate Singleplayer / Co-Op and Combat
+    Simulator limits.
+  - Max Simulated Bodies is now Max Active Bodies (12 to 256, or
+    Unlimited).
+  - Max Bodies goes Vanilla (bodies fade away as in the original), then
+    12 to 256, or Unlimited.
+
+NAME BANNER
+  - Each player can show their name in a box at the bottom left of the
+    HUD, styled like a pickup message (Options > Extended > Game > Name
+    Banner, off by default). In the Combat Simulator it's the profile
+    name; in solo and co-op a name each player sets (player 1 defaults to
+    the agent file's name). Five colour presets or your own. Based on the
+    banner in murkantor's netplay fork.
+
+BODY AWARENESS
+  - Each player can see their own body in first person: look down and the
+    legs and torso are there, walking, running and crouching with you
+    (Options > Extended > Game > Body Awareness, off by default). It only
+    shows when you look down. The head and arms are left out; the first
+    person gun and hands are drawn as usual.
+
+GRAVITY
+  - Gravity settings for fun (Options > Extended > Physics > Gravity).
+    Gravity (-500% to 500% of the original) changes the ragdolls, items and
+    bullet casings, sparks and glass shards; below 0% it's inverted and they
+    fall up to the ceiling. Player Gravity (5% to 500%) changes how fast
+    you, guards and simulants fall, so you can keep normal gameplay with
+    floaty bodies. Below 100% falling bodies don't scream. What players,
+    simulants and guards throw or fire keeps the original gravity. At 100%
+    (the default for both) everything plays as before, except that items
+    knocked upward now stop at the same ceilings bodies do (as they do at
+    any gravity, inverted included). When gravity isn't 100% items also
+    bounce off the same walls. In low gravity bullet casings that take
+    longer to land than they ever do normally land quietly, so their clinks
+    don't keep going after you stop firing.
+
+FIXES
+  - DK Mode: characters lost their big head and arms when they died
+    (ragdolls are drawn from the physics pose, which skipped the cheat's
+    scaling). They keep them now, and their bodies have the same
+    proportions, so the big head and long arms don't go through walls.
+  - Above 60 FPS, Air Force One's cargo bay lift went straight back
+    down as soon as it reached the top. Lifts now set off for their next
+    stop on whole 60ths, so the level's script sees them stop.
+  - The psychosis gun could knock a guard out with a headshot (and turn
+    him into a ragdoll). It only turns guards, as in the original.
+  - Simulants above 60 FPS (uncapped tick rate): out of view they could
+    stand facing an enemy without ever firing, for minutes at a time, and
+    they gave up too soon when steering round something in their way.
+  - Short simulants (Maians, or with Small Characters) could walk back and
+    forth near a doorway or low ceiling forever (their route checks thought
+    they were too tall to fit under it), or circle under a raised pad they
+    could never reach (Base).
+  - A character caught on the side of a ladder could hang there for good
+    with its climb blocked; it now lets go and walks on.
+  - Simulants above 60 FPS saw you, turned to you and settled their aim
+    sooner than at 60 FPS (some checks ran every frame), and off screen they
+    readied their shots faster than at 60 FPS. Now the same at any rate.
+  - Simulants above 60 FPS went after the player more often: right after
+    spawning they could pick you as their target before checking where
+    anyone was, and kept hunting you out of sight (at 240 FPS about 60%
+    longer). Now the same as at 60 FPS.
+  - Simulants in the Warehouse vents went back and forth in the low
+    tunnels, or got stuck for good at a tunnel's end (worst at 240 FPS):
+    their route checks dipped under the vent floor or hit the top of a
+    tunnel's mouth, they stood up too soon on the way out, and at 60 FPS a
+    step into a spot with mismatched room data was refused outright.
+  - Characters could drop through the floor where a low room meets a taller
+    one and fall out of the level (Warehouse: stepping into the crawl
+    tunnels; it happened before too, more often now that simulants use the
+    vents). The game placed them in the big room around the tunnel, which
+    has no floor there.
+  - Fixed a rare crash when a level starts (light glares left over from
+    the last level).
+  - If the game freezes (Windows), a crash log is written after 10 seconds
+    showing where it was stuck.
+
 CONTROLLERS
   - The builds now include gamecontrollerdb.txt (the community controller
     list, github.com/mdqinc/SDL_GameControllerDB), so more controllers work

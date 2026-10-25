@@ -3,6 +3,9 @@
 #include "bss.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 void shardsTick(void)
 {
@@ -25,7 +28,11 @@ void shardsTick(void)
 
 				for (j = 0; j < (s32)lvupdate; j++) {
 					g_Shards[i].pos.y += g_Shards[i].vel.y;
+#ifdef PD_GRAVITY
+					g_Shards[i].vel.y -= PALUPF(0.1f) * gravityScale(); // MOD: gravity
+#else
 					g_Shards[i].vel.y -= PALUPF(0.1f);
+#endif
 				}
 
 				if (g_Shards[i].age60 >= TICKS(150)) {

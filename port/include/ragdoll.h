@@ -49,11 +49,25 @@ extern s32 g_RagdollDismemberExplosions;
 extern s32 g_RagdollDismemberTorso;
 extern s32 g_RagdollBodyAlerts;
 extern s32 g_RagdollBodyCover;
+// MOD: combat simulator ragdolls - its own limits; resting bodies turn solid (RD_SOLID_*)
+extern s32 g_RagdollMpMaxBodies;
+extern s32 g_RagdollMpMaxPhysical;
+extern s32 g_RagdollMpSolid;
 extern f32 g_RagdollGlassBreakSpeed;
 extern s32 g_RagdollLedgeCatch;
 extern f32 g_RagdollReflexStrength;
 
 #define RD_MAXBODIES_LIMIT 256
+#define RD_MINBODIES 12 // the lowest Max Bodies above Vanilla (about what the original keeps)
+#define RD_MINACTIVE 12 // and Max Active Bodies
+
+#define RD_SOLID_OFF       0
+#define RD_SOLID_COMBATSIM 1
+#define RD_SOLID_BOTH      2
+
+s32 ragdollMaxActive(void);
+s32 ragdollBodiesVanilla(void);
+s32 ragdollSolidEnabled(void);
 
 // MOD: physics presets (Extended > Physics > Preset)
 #define RD_PRESET_DEFAULT 0
@@ -107,6 +121,16 @@ s32 ragdollBodyBlocksShot(struct chrdata *shooter, struct prop *targetprop, stru
 
 // The ragdoll has come to rest (chrTickDie then switches to ACT_DEAD)
 s32 ragdollIsChrSettled(struct chrdata *chr);
+// glassDestroy: bodies on or by the pane wake up (solid ones too)
+void ragdollOnGlassBroken(struct prop *prop);
+// MOD: combat simulator ragdolls
+// chrTickDead: a simulant's body stays as it respawns (no fade)
+s32 ragdollMpKeepsBody(struct chrdata *chr);
+// chrDie: a simulant dies
+void ragdollOnBotDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, struct gset *gset);
+// botSpawn / playerStartNewLife: the body stays (as a corpse chr) or goes
+struct player;
+s32 ragdollOnCombatantRespawn(struct chrdata *chr, struct player *player);
 // chrTickDie(), while the ragdoll is still dying: who sees the body (chrAlertOthersOfInjury)
 void ragdollAlertOthersOfDeath(struct chrdata *chr);
 
@@ -144,6 +168,11 @@ void ragdollOnExplosion(struct chrdata *chr, struct coord *centre, f32 radius, f
 
 // chrYeetFromPos(): a blast killed this chr (the game would play a scripted throw)
 void ragdollOnChrYeet(struct chrdata *chr, struct coord *exppos);
+// bbikeCalculateNewPositionWithPush(): the hoverbike ran into this chr
+// (speedx/z: its speed per 60th; recentdist: how far it really moved in the
+// last half second). With a long enough run-up it's run over (killed,
+// knocked down as a ragdoll): true
+s32 ragdollOnBikeHitChr(struct chrdata *chr, struct prop *bike, f32 speedx, f32 speedz, f32 recentdist);
 // chrTickDie(): a scripted death animation (Villa snipers, Chicago railing) ended: becomes a ragdoll
 s32 ragdollOnSpecialDieEnd(struct chrdata *chr);
 

@@ -200,8 +200,9 @@ s32 ragdollWantPlayerBody(void)
 {
 	s32 pn = g_Vars.currentplayernum;
 
+	// MOD: combat simulator ragdolls - the Combat Simulator too
 	if (!g_RagdollsEnabled || !g_RagdollDeathCam || !g_RagdollLevelLoaded || !pdphysIsReady()
-			|| g_Vars.normmplayerisrunning || g_Vars.stagenum >= STAGE_TITLE
+			|| g_Vars.stagenum >= STAGE_TITLE
 			|| pn < 0 || pn >= MAX_PLAYERS) {
 		return false;
 	}
@@ -245,7 +246,10 @@ void ragdollOnPlayerNewLife(void)
 		return;
 	}
 
-	if (ragdollFindByChr(player->prop->chr)) {
+	// MOD: combat simulator ragdolls - there the body can stay (as a corpse chr)
+	if (ragdollOnCombatantRespawn(player->prop->chr, player)) {
+		sysLogPrintf(LOG_NOTE, "RAGDOLL: player %d respawned: their body stays", pn);
+	} else if (ragdollFindByChr(player->prop->chr)) {
 		sysLogPrintf(LOG_NOTE, "RAGDOLL: player %d respawned: their body stops being a ragdoll", pn);
 	}
 
@@ -299,6 +303,36 @@ void ragdollPlayerBodyTick(void)
 
 	chr = player->prop->chr;
 	pc->bodyframes++;
+
+	// MOD: combat simulator ragdolls - in multiplayer the player's body is
+	// made at the match start and kept from life to life, and player.c only
+	// moves it across (x, z): it started in the air or under the floor. Put
+	// it where the player is. Its root is its ground plus the animation's
+	// height above it (model.c): move the ground to the player's floor, or
+	// the animation pulls the body back to the old height.
+	if (g_Vars.mplayerisrunning && pc->bodyframes <= 2) {
+		struct coord root;
+
+		modelGetRootPosition(chr->model, &root);
+
+		if ((chr->model->definition->rootnode->type & 0xff) == MODELNODETYPE_CHRINFO) {
+			struct modelrwdata_chrinfo *ci = modelGetNodeRwData(chr->model, chr->model->definition->rootnode);
+			f32 dy = player->vv_ground - ci->ground;
+
+			if (pc->bodyframes == 1 && (dy > 1.0f || dy < -1.0f)) {
+				sysLogPrintf(LOG_NOTE, "RAGDOLL: death camera: player %d's body was on a floor %.0f units %s theirs, moved to it (root %.0f above the floor)",
+						g_Vars.currentplayernum, dy < 0.0f ? -dy : dy, dy < 0.0f ? "above" : "below", root.y - ci->ground);
+			}
+
+			root.x = player->prop->pos.x;
+			root.y += dy;
+			root.z = player->prop->pos.z;
+			modelSetRootPosition(chr->model, &root);
+			ci->ground = player->vv_ground;
+		} else {
+			modelSetRootPosition(chr->model, &player->prop->pos);
+		}
+	}
 
 	if (pc->bodyframes == 1) {
 		// Start one of the game's death animations on the body
@@ -355,7 +389,31 @@ void ragdollPlayerBodyTick(void)
 	g_RagdollCreatingPlayer = chr;
 
 	if (pc->hitframe != 0 && g_Vars.lvframe60 - pc->hitframe < 60) {
-		ragdollOnChrDeath(chr, &pc->hitdir, pc->hitpart, pc->hithasgset ? &pc->hitgset : NULL, false);
+		s32 hitpart = pc->hitpart;
+
+		// Shots at a player don't say what they hit (HITPART_GENERAL), so
+		// nothing ever came off the player's body. Pick a part as shots at a
+		// standing body land. (A head shot off takes the death camera with it.)
+		if (hitpart < 0 || hitpart >= 20) {
+			static const s8 parts[] = {
+				HITPART_TORSO, HITPART_TORSO, HITPART_TORSO, HITPART_TORSO,
+				HITPART_TORSO, HITPART_TORSO, HITPART_TORSO, HITPART_TORSO,
+				HITPART_TORSO, HITPART_TORSO, HITPART_TORSO, HITPART_TORSO,
+				HITPART_TORSO, HITPART_TORSO, HITPART_TORSO, HITPART_TORSO, // 40%
+				HITPART_HEAD, HITPART_HEAD, HITPART_HEAD,
+				HITPART_HEAD, HITPART_HEAD, HITPART_HEAD, // 15%
+				HITPART_PELVIS, HITPART_PELVIS, HITPART_PELVIS, HITPART_PELVIS, // 10%
+				HITPART_LBICEP, HITPART_LBICEP, HITPART_RBICEP, HITPART_RBICEP,
+				HITPART_LFOREARM, HITPART_LFOREARM, HITPART_RFOREARM, HITPART_RFOREARM, // 20%
+				HITPART_LTHIGH, HITPART_LTHIGH, HITPART_RTHIGH, HITPART_RTHIGH,
+				HITPART_LSHIN, HITPART_RSHIN, // 15%
+			};
+
+			hitpart = parts[rngRandom() % ARRAYCOUNT(parts)];
+			sysLogPrintf(LOG_NOTE, "RAGDOLL: death camera: the shot that killed player %d didn't say where it hit: part %d", g_Vars.currentplayernum, hitpart);
+		}
+
+		ragdollOnChrDeath(chr, &pc->hitdir, hitpart, pc->hithasgset ? &pc->hitgset : NULL, false);
 	} else {
 		ragdollOnChrDeath(chr, NULL, HITPART_GENERAL, NULL, false);
 	}
@@ -411,7 +469,7 @@ void ragdollOnPlayerExplosion(struct prop *prop, struct coord *centre, f32 radiu
 	s32 pn = playermgrGetPlayerNumByProp(prop);
 	struct rdplayercam *pc;
 
-	if (pn < 0 || pn >= MAX_PLAYERS || g_Vars.normmplayerisrunning) {
+	if (pn < 0 || pn >= MAX_PLAYERS) { // MOD: combat simulator ragdolls (was solo/co-op only)
 		return;
 	}
 
@@ -439,7 +497,7 @@ void ragdollOnPlayerHit(struct prop *prop, struct coord *dir, s32 hitpart, struc
 	struct rdplayercam *pc;
 	f32 len;
 
-	if (pn < 0 || pn >= MAX_PLAYERS || g_Vars.normmplayerisrunning || dir == NULL) {
+	if (pn < 0 || pn >= MAX_PLAYERS || dir == NULL) { // MOD: combat simulator ragdolls (was solo/co-op only)
 		return;
 	}
 

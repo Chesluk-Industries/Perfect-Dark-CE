@@ -254,6 +254,12 @@ if(PD_CLIPCHECK AND PD_PHYSICS)
   add_definitions(-DPD_CLIPCHECK=1)
 endif()
 
+# MOD: gravity - the gravity setting (port/src/gravity.c)
+option(PD_GRAVITY "Gravity setting (falling, ragdolls, debris)" ON)
+if(PD_GRAVITY)
+  add_definitions(-DPD_GRAVITY=1)
+endif()
+
 # Compiler flags
 
 # Include directories

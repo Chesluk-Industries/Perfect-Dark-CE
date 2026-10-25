@@ -770,8 +770,9 @@ static void ragdollSyncProp(struct prop *prop, f32 dt)
 
 	// What the player walks through, bodies fall through too (except glass
 	// without collision of its own: the game relies on the wall behind it)
-	if (prop->type == PROPTYPE_OBJ && prop->obj && !propIsOfCdType(prop, CDTYPE_ALL)
-			&& prop->obj->type != OBJTYPE_GLASS && prop->obj->type != OBJTYPE_TINTEDGLASS) {
+	if ((prop->type == PROPTYPE_OBJ && prop->obj && !propIsOfCdType(prop, CDTYPE_ALL)
+				&& prop->obj->type != OBJTYPE_GLASS && prop->obj->type != OBJTYPE_TINTEDGLASS)
+			|| (prop->obj && (prop->obj->hidden2 & OBJH2FLAG_DESTROYED))) { // (broken glass: gone at once)
 		if (rp) {
 			ragdollPropRelease(rp);
 		}
@@ -1298,6 +1299,8 @@ static void ragdollCarryOnLift(struct prop *lift, const f32 *d, const f32 *dv, c
 			continue;
 		}
 
+		ragdollUnsolid(rd, "a moving lift"); // MOD: combat simulator ragdolls - a moving lift carries it
+
 		rd->liftnear60 = g_Vars.lvframe60 > 0 ? g_Vars.lvframe60 : 1;
 		rdVecCopy(vel, rd->liftvel);
 
@@ -1350,10 +1353,17 @@ static void ragdollWakeNear(struct prop *mover)
 		}
 
 		if (rd->state == RDSTATE_SIMULATING) {
-			if (!(rd->settled && pdphysRagdollIsAsleep(rd->handle))) {
+			if (!rd->solid && !(rd->settled && pdphysRagdollIsAsleep(rd->handle))) {
 				continue; // awake: already synced with what's around it
 			}
 		} else if (rd->state != RDSTATE_FROZEN) {
+			continue;
+		}
+
+		// MOD: combat simulator ragdolls - a solid body only moves again for a
+		// moving lift or breaking glass (doors go through it)
+		if (rd->solid && !(mover->type == PROPTYPE_OBJ && mover->obj
+					&& (mover->obj->type == OBJTYPE_LIFT || (mover->obj->hidden2 & OBJH2FLAG_DESTROYED)))) {
 			continue;
 		}
 
@@ -1370,16 +1380,27 @@ static void ragdollWakeNear(struct prop *mover)
 				continue;
 			}
 		} else {
+			ragdollUnsolid(rd, "a moving lift or broken glass"); // MOD: combat simulator ragdolls
 			pdphysRagdollAddVelocity(rd->handle, -1, zero); // wakes every part
 		}
 
 		if (rd->propwake60 <= 0 || g_Vars.lvframe60 - rd->propwake60 > 300) {
-			sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d woken by a moving %s (prop %d, obj type %d)",
-					RD_RDCHRNUM(rd), mover->type == PROPTYPE_DOOR ? "door" : "object",
+			sysLogPrintf(LOG_NOTE, "RAGDOLL: chr %d woken by a %s (prop %d, obj type %d)",
+					RD_RDCHRNUM(rd), mover->type == PROPTYPE_DOOR ? "moving door"
+					: (mover->obj && (mover->obj->hidden2 & OBJH2FLAG_DESTROYED)) ? "breaking glass" : "moving object",
 					(s32) (mover - g_Vars.props), mover->obj ? mover->obj->type : -1);
 		}
 
 		rd->propwake60 = g_Vars.lvframe60 > 0 ? g_Vars.lvframe60 : 1;
+	}
+}
+
+// MOD: ragdoll physics - glassDestroy: sleeping, frozen and solid bodies by
+// the pane wake up (a body on a glass floor falls when it breaks)
+void ragdollOnGlassBroken(struct prop *prop)
+{
+	if (prop && g_RagdollNumUsed > 0) {
+		ragdollWakeNear(prop);
 	}
 }
 
@@ -1408,7 +1429,7 @@ void ragdollWakeOnMovedProps(void)
 	for (i = 0; i < RD_MAXRAGDOLLS; i++) {
 		struct ragdoll *rd = &g_Ragdolls[i];
 
-		if (!rd->fellout && (rd->state == RDSTATE_FROZEN
+		if (!rd->fellout && (rd->state == RDSTATE_FROZEN || rd->solid
 					|| (rd->state == RDSTATE_SIMULATING && rd->settled && pdphysRagdollIsAsleep(rd->handle)))) {
 			anysleeping = true;
 			break;
@@ -1712,7 +1733,8 @@ s32 ragdollBlocksDoor(struct doorobj *door)
 		struct ragdoll *rd = &g_Ragdolls[i];
 		f32 dx, dz;
 
-		if (rd->state == RDSTATE_FREE || rd->prop == NULL || rd->fellout) {
+		// MOD: combat simulator ragdolls - doors go through solid bodies (never blocked in a long match)
+		if (rd->state == RDSTATE_FREE || rd->prop == NULL || rd->fellout || rd->solid) {
 			continue;
 		}
 

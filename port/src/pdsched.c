@@ -393,6 +393,14 @@ void schedResetArtifacts(void)
 		g_SchedFrontArtifactsIndex[player] = 1;
 		g_SchedPendingArtifactsIndex[player] = 0;
 
+		// MOD: split-screen glares (fix) - empty the lists: the last level's
+		// glares were looked up in the new level's light table, out of range
+		for (s32 i = 0; i < 3; i++) {
+			for (s32 j = 0; j < MAX_ARTIFACTS; j++) {
+				g_ArtifactLists[player][i][j].type = ARTIFACTTYPE_FREE;
+			}
+		}
+
 		if (g_LightTable[player]) {
 			sysMemFree(g_LightTable[player]);
 			g_LightTable[player] = NULL;

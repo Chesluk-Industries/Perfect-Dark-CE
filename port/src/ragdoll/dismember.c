@@ -14,6 +14,30 @@ struct rdvolley g_RdVolley;
 
 
 #define RD_CUTCOLOUR_LIFT 1.35f // cap colour = blood droplet colour x this
+#define RD_CUTPAINT_CENTRE 190  // Paintball Mode: the cap's centre is the paint x this / 255
+
+/**
+ * Paintball Mode (the player's Paintball option): a cut gets a paint colour,
+ * red, green and blue each full or off, as the game's paint sparks
+ * (sparks.c SPARKTYPE_PAINT: never black). 0 when it's off: blood.
+ */
+static u32 rdPaintColour(void)
+{
+	u32 c;
+
+	if (g_Vars.currentplayer == NULL || g_Vars.currentplayer->prop == NULL
+			|| !chrIsUsingPaintball(g_Vars.currentplayer->prop->chr)) {
+		return 0;
+	}
+
+	c = ((rngRandom() % 2) ? 0xff000000 : 0) | ((rngRandom() % 2) ? 0x00ff0000 : 0) | ((rngRandom() % 2) ? 0x0000ff00 : 0) | 0xff;
+
+	if (c == 0x000000ff) {
+		c |= 0x0000ff00 << ((rngRandom() % 3) * 8);
+	}
+
+	return c;
+}
 
 /**
  * Next node in a walk of a chr's model tree.
@@ -547,6 +571,7 @@ static void ragdollAddDiscCap(struct ragdoll *rd, s32 cut, bool childside)
 	rd->numcaps++;
 	rd->numdisccaps++;
 	cap->part = frame;
+	cap->cut = cut;
 	cap->numedges = 8;
 
 	for (k = 0; k < 3; k++) {
@@ -587,6 +612,85 @@ static void ragdollAddDiscCap(struct ragdoll *rd, s32 cut, bool childside)
  * a fan from its centre whose rim vertices use exactly the same matrices and
  * coordinates as the mesh, so the cap follows the edge of the hole.
  */
+/**
+ * A hole two cuts share (both legs off on some models: the pelvis is open
+ * from hip to hip, the crotch went with the legs) is split between the two
+ * cuts by nearest cut, into two open halves, and each half's fan left the
+ * middle open. Where a cut's border edges don't close into loops of their
+ * own (a vertex used an odd number of times), its hole is joined with the
+ * others it touches and capped as one (bgroup rewritten; mergedinto[cut] =
+ * the cut it was joined to).
+ */
+static void ragdollMergeSharedHoles(struct ragdoll *rd, struct rdmeshbuild *mb, struct rdmedge **border, s32 numborder,
+		s32 *bgroup, s32 *uf, s32 *mergedinto)
+{
+	s32 *deg = malloc(mb->numverts * sizeof(s32) + 4);
+	bool open[RD_NUMPARTS];
+	s32 g, i, j;
+
+	if (!deg) {
+		return;
+	}
+
+	memset(open, 0, sizeof(open));
+
+	for (g = 1; g < rd->numparts; g++) {
+		if ((rd->severed & (1u << g)) == 0) {
+			continue;
+		}
+
+		memset(deg, 0, mb->numverts * sizeof(s32));
+
+		for (i = 0; i < numborder; i++) {
+			if (bgroup[i] == g) {
+				deg[border[i]->a]++;
+				deg[border[i]->b]++;
+			}
+		}
+
+		for (i = 0; i < mb->numverts && !open[g]; i++) {
+			open[g] = (deg[i] & 1) != 0;
+		}
+	}
+
+	free(deg);
+
+	for (i = 0; i < mb->numverts; i++) {
+		uf[i] = i;
+	}
+
+	for (i = 0; i < numborder; i++) {
+		uf[rdFind(uf, border[i]->a)] = rdFind(uf, border[i]->b);
+	}
+
+	for (i = 0; i < numborder; i++) {
+		s32 root = rdFind(uf, border[i]->a);
+		s32 into = -1;
+		bool anyopen = false;
+
+		for (j = 0; j < numborder; j++) {
+			if (bgroup[j] > 0 && rdFind(uf, border[j]->a) == root) {
+				anyopen |= open[bgroup[j]];
+
+				if (into < 0) {
+					into = bgroup[j];
+				}
+			}
+		}
+
+		if (!anyopen || into < 0) {
+			continue;
+		}
+
+		for (j = 0; j < numborder; j++) {
+			if (bgroup[j] > 0 && bgroup[j] != into && rdFind(uf, border[j]->a) == root) {
+				mergedinto[bgroup[j]] = into;
+				bgroup[j] = into;
+			}
+		}
+	}
+}
+
 static void ragdollBuildCaps(struct ragdoll *rd)
 {
 	RD_CRASHCTX("buildcaps", RD_RDCHRNUM(rd), -1);
@@ -597,7 +701,12 @@ static void ragdollBuildCaps(struct ragdoll *rd)
 	bool covered[RD_NUMPARTS][2];
 	f32 cutpos[RD_NUMPARTS][3];
 	f32 cutreach[RD_NUMPARTS];
+	s32 mergedinto[RD_NUMPARTS]; // a cut whose hole was capped with another's (that one), else -1
 	s32 i;
+
+	for (i = 0; i < RD_NUMPARTS; i++) {
+		mergedinto[i] = -1;
+	}
 
 	ragdollFreeCaps(rd);
 	rd->numdisccaps = 0;
@@ -1022,6 +1131,8 @@ static void ragdollBuildCaps(struct ragdoll *rd)
 					}
 				}
 
+				ragdollMergeSharedHoles(rd, &mb, border, numborder, bgroup, uf, mergedinto);
+
 				for (g = 1; g < rd->numparts; g++) {
 					if ((rd->severed & (1u << g)) == 0) {
 						continue;
@@ -1109,6 +1220,7 @@ static void ragdollBuildCaps(struct ragdoll *rd)
 				rd->numcaps++;
 				covered[cut][childside ? 1 : 0] = true;
 				cap->part = frame;
+				cap->cut = cut;
 				cap->numedges = 0;
 
 				for (j = 0; j < 3; j++) {
@@ -1164,6 +1276,14 @@ done:
 	free(mb.fpos);
 	free(mb.hash);
 	free(mb.edges);
+
+	// A hole capped with another cut's is covered on that side too
+	for (i = 1; i < rd->numparts; i++) {
+		if (mergedinto[i] > 0) {
+			covered[i][0] |= covered[mergedinto[i]][0];
+			covered[i][1] |= covered[mergedinto[i]][1];
+		}
+	}
 
 	// Holes the mesh couldn't describe get a small disc
 	for (i = 1; i < rd->numparts; i++) {
@@ -1225,15 +1345,19 @@ static bool ragdollSever(struct ragdoll *rd, s32 part, const f32 *vel)
 	s32 k;
 
 	if (part <= 0 || part >= rd->numparts || rd->skel->cutradius[part] <= 0.0f
-			|| (rd->severed & (1u << part)) || rd->bodyindex[part] < 0) {
+			|| (rd->severed & (1u << part)) || rd->bodyindex[part] < 0
+			|| (rd->solid && g_Vars.normmplayerisrunning)) { // MOD: combat simulator ragdolls - a solid one stays whole (in solo a cut wakes it)
 		return false;
 	}
+
+	ragdollUnsolid(rd, "a limb cut off");
 
 	if (!ragdollWakeFrozen(rd)) {
 		return false;
 	}
 
 	rd->severed |= 1u << part;
+	rd->cutpaint[part] = rdPaintColour();
 
 	// A leg cut off while the death animation plays: it carries on for a
 	// moment, then the body goes limp (64 frames)
@@ -1640,6 +1764,7 @@ Gfx *ragdollRenderCaps(Gfx *gdl, struct chrdata *chr)
 	struct model *model;
 	s32 nummtx;
 	Col *colours;
+	u32 curpaint = 0; // Paintball Mode: the paint colours last set (0: the blood's)
 	u32 alpha = 255;
 	s32 i;
 
@@ -1698,9 +1823,27 @@ Gfx *ragdollRenderCaps(Gfx *gdl, struct chrdata *chr)
 		s32 centremtx = rd->mtxindex[cap->part];
 		s32 curmtx = -1;
 		s32 e = 0;
+		u32 paint = cap->cut > 0 && cap->cut < rd->numparts ? rd->cutpaint[cap->cut] : 0;
 
 		if (centremtx < 0 || centremtx >= nummtx) {
 			continue;
+		}
+
+		// Paintball Mode: the cut's paint (the same on both ends), the
+		// centre a little darker, as the blood's is
+		if (paint != curpaint) {
+			if (paint) {
+				Col *pc = gfxAllocateColours(2);
+				u32 r = (paint >> 24) & 0xff, g = (paint >> 16) & 0xff, b = (paint >> 8) & 0xff;
+
+				pc[0].word = PD_BE32(((r * RD_CUTPAINT_CENTRE / 255) << 24) | ((g * RD_CUTPAINT_CENTRE / 255) << 16) | ((b * RD_CUTPAINT_CENTRE / 255) << 8) | alpha);
+				pc[1].word = PD_BE32((r << 24) | (g << 16) | (b << 8) | alpha);
+				gSPColor(gdl++, osVirtualToPhysical(pc), 2);
+			} else {
+				gSPColor(gdl++, osVirtualToPhysical(colours), 2);
+			}
+
+			curpaint = paint;
 		}
 
 		// Fan from the centre. Rim vertices use the same matrices and
@@ -1838,7 +1981,9 @@ void ragdollBleed(struct ragdoll *rd)
 		dir.y = n[1] + ((s32)(rngRandom() % 61) - 30) * 0.01f;
 		dir.z = n[2] + ((s32)(rngRandom() % 61) - 30) * 0.01f;
 
-		sparksCreate(rd->prop->rooms[0], rd->prop, &pos, &dir, NULL, SPARKTYPE_BLOOD);
+		// Paintball Mode: a painted cut sprays paint, as a paintball hit does
+		sparksCreate(rd->prop->rooms[0], rd->prop, &pos, &dir, NULL,
+				cap->cut > 0 && cap->cut < rd->numparts && rd->cutpaint[cap->cut] ? SPARKTYPE_PAINT : SPARKTYPE_BLOOD);
 		budget--;
 
 		if (dosplat && splatbudget > 0) {

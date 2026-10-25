@@ -103,7 +103,13 @@
 #include "lib/vi.h"
 #include "types.h"
 #ifndef PLATFORM_N64
+#include "namebanner.h" // MOD: name banner
+#endif
+#ifndef PLATFORM_N64
 #include "video.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 #endif
 
 struct sndstate *g_MiscSfxAudioHandles[3];
@@ -277,6 +283,10 @@ void lvUpdateMiscSfx(void)
 void lvReset(s32 stagenum)
 {
 	lvFadeReset();
+
+#ifdef PD_GRAVITY
+	gravityStageStart(); // MOD: gravity
+#endif
 
 	var80084014 = false;
 	var80084010 = 0;
@@ -990,7 +1000,13 @@ void lvFindThreats(void)
 	while (propptr >= g_Vars.onscreenprops) {
 		prop = *propptr;
 
+#ifndef PLATFORM_N64
+		// MOD: body awareness - not the weapon in your own body's hand (only
+		// on screen with Body Awareness)
+		if (prop && prop != g_Vars.currentplayer->prop) {
+#else
 		if (prop) {
+#endif
 			lvFindThreatsForProp(prop, false, &campos, activeslots, distances);
 		}
 
@@ -1439,6 +1455,11 @@ Gfx *lvRender(Gfx *gdl)
 					if (g_Vars.currentplayer->visionmode != VISIONMODE_XRAY) {
 						gdl = bgRenderArtifacts(gdl);
 					}
+#ifndef PLATFORM_N64
+
+					// MOD: name banner - no HUD this frame: a shown banner wipes out
+					gdl = nameBannerRenderHidden(gdl);
+#endif
 				}
 
 				if (g_DebugScreenshotRgb <= 0) {

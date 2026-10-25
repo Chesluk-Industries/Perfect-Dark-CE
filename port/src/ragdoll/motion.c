@@ -44,7 +44,19 @@ static bool ragdollSampleAnimPose(struct ragdoll *rd, Mtxf *out)
 
 	saved = model->matrices;
 	g_RagdollSamplingAnim = true;
-	modelSetMatricesWithAnim(&renderdata, model);
+
+	// The pure animation: the chr renderer's joint hook (aiming twists of
+	// the waist and shoulders) is left set after drawing a chr, and applied
+	// here it bent this body's target pose by whichever chr was drawn last -
+	// a respawned simulant's aim moved its old body's torso.
+	{
+		void (*jointfunc)(s32 mtxindex, Mtxf *mtx) = g_ModelJointPositionedFunc;
+
+		g_ModelJointPositionedFunc = NULL;
+		modelSetMatricesWithAnim(&renderdata, model);
+		g_ModelJointPositionedFunc = jointfunc;
+	}
+
 	g_RagdollSamplingAnim = false;
 	model->matrices = saved;
 
@@ -79,6 +91,7 @@ static bool ragdollSampleAnimPose(struct ragdoll *rd, Mtxf *out)
 	}
 
 	free(buffer);
+	rdDkSpread(rd, out); // DK Mode: the body's own proportions
 	return true;
 }
 

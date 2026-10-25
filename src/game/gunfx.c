@@ -16,6 +16,9 @@
 #include "lib/mtx.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 #define BOLTBEAMTICKMODE_MANUAL    0
 #define BOLTBEAMTICKMODE_AUTOMATIC 1
@@ -801,7 +804,11 @@ void casingCreateForHand(s32 handnum, f32 ground, Mtxf *mtx)
 			sp5c = ((s32)((rngRandom() >> 24) * magic) >> 10) + magic;
 			f0 = (rngRandom() % sp5c) / PALUP((f32) (OS_CPU_COUNTER / 60));
 
+#ifdef PD_GRAVITY
+			newyspeed = casing->speed.y - f0 * 0.2777778f * gravityScale(); // MOD: gravity
+#else
 			newyspeed = casing->speed.y - f0 * 0.2777778f;
+#endif
 
 			casing->pos.y += f0 * (casing->speed.y + newyspeed) * 0.5f;
 			casing->pos.x += f0 * casing->speed.x;
@@ -858,7 +865,11 @@ void casingCreateForHand(s32 handnum, f32 ground, Mtxf *mtx)
 			sp4c = ((s32) ((rngRandom() >> 24) * magic) >> 10) + magic;
 			f0 = (rngRandom() % sp4c) / PALUP((f32) (OS_CPU_COUNTER / 60));
 
+#ifdef PD_GRAVITY
+			newyspeed = casing->speed.y - f0 * 0.2777778f * gravityScale(); // MOD: gravity
+#else
 			newyspeed = casing->speed.y - f0 * 0.2777778f;
+#endif
 
 			casing->pos.y += f0 * (casing->speed.y + newyspeed) * 0.5f;
 			casing->pos.x += f0 * casing->speed.x;

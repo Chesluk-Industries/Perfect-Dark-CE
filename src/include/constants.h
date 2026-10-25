@@ -24,7 +24,13 @@
 #define MAX_OBJECTIVES         10
 #define MAX_PLAYERS            4
 #define MAX_PROPSPERROOMCHUNK  7
+#ifdef PLATFORM_N64
 #define MAX_ROOMPROPLISTCHUNKS 256
+#else
+// MOD: room prop list limit - room for hundreds of bodies (256 chunks of 7
+// props ran out)
+#define MAX_ROOMPROPLISTCHUNKS 1024
+#endif
 #define MAX_SQUADRONS          16
 #define MAX_TEAMS              8
 #define MAX_EXPLOSIONS_DEFAULT 6

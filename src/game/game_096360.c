@@ -10,6 +10,9 @@
 #include "lib/mtx.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 void mtxLoadRandomRotation(Mtxf *mtx)
 {
@@ -33,7 +36,12 @@ void func0f0964b4(struct coord *coord, Mtxf *mtx)
 
 void func0f0965e4(f32 *arg0, f32 *arg1, f32 arg2)
 {
+#ifdef PD_GRAVITY
+	// MOD: gravity - characters falling (chr.c is the only caller)
+	f32 tmp = arg1[0] - arg2 * 0.27777779f * gravityPlayerScale();
+#else
 	f32 tmp = arg1[0] - arg2 * 0.27777779f;
+#endif
 	arg0[0] += arg2 * (arg1[0] + tmp) * 0.5f;
 	arg1[0] = tmp;
 }

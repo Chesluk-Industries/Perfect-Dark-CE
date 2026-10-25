@@ -46,6 +46,9 @@ void crashShutdown(void);
 // MOD: crash logs: puts the crash handler back if something loaded later
 // (a graphics driver) replaced it
 void crashReinstall(void);
+// MOD: hang logs: called once per frame; a watchdog writes a crash log with
+// the main thread's stack if frames stop for 10 s (Windows)
+void crashHeartbeat(void);
 
 // MOD: crash logs
 // Writes pd.crash.log (latest) and pd.crash-<date>-<time>.log next to pd.log:

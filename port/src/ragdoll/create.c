@@ -14,6 +14,52 @@
  * each skeleton part's joint frame. Also works out which hitpart belongs to
  * which part. Returns false if the model isn't a standard human skeleton.
  */
+// The shoulder (3/4) a part hangs below (elbow, hand), or -1
+static s32 rdDkShoulderOf(const struct ragdoll *rd, s32 part)
+{
+	for (part = rd->skel->parent[part]; part > 0; part = rd->skel->parent[part]) {
+		if (part == 3 || part == 4) {
+			return part;
+		}
+	}
+
+	return -1;
+}
+
+// A part below a shoulder: DK Mode draws it further out
+bool rdDkArmPart(const struct ragdoll *rd, s32 part)
+{
+	return rd->dk && rdDkShoulderOf(rd, part) >= 0;
+}
+
+// A point that hangs off the arm, moved out from the shoulder at the arm's scale
+static void rdDkSpreadPoint(f32 *point, const f32 *shoulder)
+{
+	s32 k;
+
+	for (k = 0; k < 3; k++) {
+		point[k] = shoulder[k] + (point[k] - shoulder[k]) * RD_DK_ARMSCALE;
+	}
+}
+
+// Joint frames as DK Mode draws them: elbows and hands moved out from the shoulder
+void rdDkSpread(const struct ragdoll *rd, Mtxf *world)
+{
+	s32 i;
+
+	if (!rd->dk) {
+		return;
+	}
+
+	for (i = 5; i < rd->numparts; i++) {
+		s32 shoulder = rdDkShoulderOf(rd, i);
+
+		if (shoulder >= 0) {
+			rdDkSpreadPoint(world[i].m[3], world[shoulder].m[3]);
+		}
+	}
+}
+
 bool ragdollCapturePose(struct ragdoll *rd, struct chrdata *chr)
 {
 	RD_CRASHCTX("capturepose", RD_CHRNUM(chr), -1);
@@ -139,7 +185,17 @@ bool ragdollCapturePose(struct ragdoll *rd, struct chrdata *chr)
 	renderdata.unk10 = buffer;
 
 	saved = model->matrices;
-	modelSetMatricesWithAnim(&renderdata, model);
+
+	// The pure animation, as the blend samples it (motion.c): without the
+	// chr renderer's aiming hook, left set to whichever chr was drawn last
+	{
+		void (*jointfunc)(s32 mtxindex, Mtxf *mtx) = g_ModelJointPositionedFunc;
+
+		g_ModelJointPositionedFunc = NULL;
+		modelSetMatricesWithAnim(&renderdata, model);
+		g_ModelJointPositionedFunc = jointfunc;
+	}
+
 	model->matrices = saved;
 
 	{
@@ -206,6 +262,22 @@ bool ragdollCapturePose(struct ragdoll *rd, struct chrdata *chr)
 		rd->localpos[i].z = local[2] / rd->scale;
 
 		rdRotTransposeMul(&rd->world[p], &rd->world[i], &rd->localrot[i]);
+	}
+
+	// DK Mode: the body takes the drawn proportions (localpos stays as
+	// modelled: the drawing scales it)
+	rd->dk = cheatIsActive(CHEAT_DKMODE) && rd->skel->human && def->skel == &g_SkelChr && CHRRACE(chr) == RACE_HUMAN;
+
+	if (rd->dk) {
+		for (i = 0; i < rd->numparts; i++) {
+			s32 shoulder = rdDkShoulderOf(rd, i);
+
+			if (rd->hastip[i] && shoulder >= 0) {
+				rdDkSpreadPoint(rd->tip[i], rd->world[shoulder].m[3]);
+			}
+		}
+
+		rdDkSpread(rd, rd->world);
 	}
 
 	// Hitpart -> physics part (parts without a body use their parent's)
@@ -538,8 +610,12 @@ s32 ragdollCreatePhysics(struct ragdoll *rd, const f32 *vel)
 			break;
 		case 2: // head
 			pp->shape = PDPHYS_SHAPE_SPHERE;
-			rdVecMad(p[2], bone[1], torso * 0.30f, pp->a);
-			pp->radius = torso * 0.26f;
+			{
+				f32 dk = rd->dk ? RD_DK_HEADSCALE : 1.0f;
+
+				rdVecMad(p[2], bone[1], torso * 0.30f * dk, pp->a);
+				pp->radius = torso * 0.26f * dk;
+			}
 			// Lying on its side, the shoulder holds the chest up: the neck needs
 			// ~45 degrees sideways for the head to reach the floor
 			// Nodding ~50 degrees, twisting ~60
@@ -547,8 +623,8 @@ s32 ragdollCreatePhysics(struct ragdoll *rd, const f32 *vel)
 			break;
 		case 3: // upper arms
 		case 4:
-			rdVecMad(p[i], bone[i], torso * 0.11f, a);
-			ragdollSetCapsule(pp, a, p[rd->skel->child[i]], torso * 0.12f);
+			rdVecMad(p[i], bone[i], torso * 0.11f * (rd->dk ? RD_DK_ARMSCALE : 1.0f), a);
+			ragdollSetCapsule(pp, a, p[rd->skel->child[i]], torso * 0.12f * (rd->dk ? RD_DK_ARMSCALE : 1.0f));
 			// Shoulders: the most mobile joint (~85 / 75 degrees of swing
 			// here, kept short of the full range so arms don't wrap round),
 			// rotating ~50 degrees each way
@@ -556,8 +632,8 @@ s32 ragdollCreatePhysics(struct ragdoll *rd, const f32 *vel)
 			break;
 		case 5: // forearms (+ hand)
 		case 6:
-			rdVecMad(p[rd->skel->child[i]], bone[i], torso * 0.18f, b);
-			ragdollSetCapsule(pp, p[i], b, torso * 0.10f);
+			rdVecMad(p[rd->skel->child[i]], bone[i], torso * 0.18f * (rd->dk ? RD_DK_ARMSCALE : 1.0f), b);
+			ragdollSetCapsule(pp, p[i], b, torso * 0.10f * (rd->dk ? RD_DK_ARMSCALE : 1.0f));
 			break;
 		case 9: // thighs
 		case 10:

@@ -807,11 +807,8 @@ void menuCalculateItemSize(struct menuitem *item, s16 *width, s16 *height, struc
 #endif
 
 			if ((item->flags & (MENUITEMFLAG_LABEL_HASRIGHTTEXT | MENUITEMFLAG_BIGFONT)) == 0) {
-#ifndef PLATFORM_N64
-				if (item->flags & MENUITEMFLAG_LITERAL_TEXT) {
-					text = (const char *)item->param3;
-				} else
-#endif
+				// MOD: name banner - measured as menuitemSelectableRender draws it
+				// (a text ID or a function, even with MENUITEMFLAG_LITERAL_TEXT)
 				text = menuResolveText(item->param3, item);
 
 				// @bug: This is not how you check for an empty string

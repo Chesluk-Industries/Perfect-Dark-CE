@@ -135,6 +135,8 @@ void videoSubmitCommands(Gfx *cmds)
 
 void videoEndFrame(void)
 {
+	crashHeartbeat(); // MOD: hang logs
+
 	if (!initDone) {
 		return;
 	}

@@ -191,7 +191,7 @@ void *vtxstoreAllocate(s32 count, s32 index, struct modelnode *node, s32 level)
 				&& chr->actiontype == ACT_DEAD
 #ifdef PD_PHYSICS
 				&& chr->act_dead.fadewheninvis == false
-				&& !ragdollIsChrRagdolled(chr)) { // MOD: ragdoll physics - never reap ragdoll corpses
+				&& (!ragdollIsChrRagdolled(chr) || ragdollBodiesVanilla())) { // MOD: ragdoll physics - never reap ragdoll corpses (unless Max Bodies is Vanilla)
 #else
 				&& chr->act_dead.fadewheninvis == false) {
 #endif

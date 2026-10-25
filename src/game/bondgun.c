@@ -58,6 +58,18 @@
 #include "game/stagetable.h"
 #include "video.h"
 #include "platform.h"
+#include "bodyview.h" // MOD: body awareness
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
+#endif
+
+// MOD: body awareness - the solo body holds the gun in hand, as the Combat
+// Simulator's do (its animations follow the gun)
+#ifndef PLATFORM_N64
+#define BODYVIEW_TRACKSWEAPONS() bodyViewTracksWeapons()
+#else
+#define BODYVIEW_TRACKSWEAPONS() false
 #endif
 
 #define GUNLOADSTATE_FLUX     0
@@ -1512,7 +1524,7 @@ s32 bgunTickIncAutoSwitch(struct handweaponinfo *info, s32 handnum, struct hand 
 		hand->shotremainder = 0;
 
 		if (bgunIsReadyToSwitch(handnum) && bgunSetState(handnum, HANDSTATE_CHANGEGUN)) {
-			if (g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) {
+			if ((g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) || BODYVIEW_TRACKSWEAPONS()) {
 				playermgrDeleteWeapon(handnum);
 			}
 
@@ -3038,7 +3050,7 @@ s32 bgunTickIncChangeGun(struct handweaponinfo *info, s32 handnum, struct hand *
 
 		if (hand->stateframes >= delay) {
 			if (!throwing) {
-				if (g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) {
+				if ((g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) || BODYVIEW_TRACKSWEAPONS()) {
 					playermgrDeleteWeapon(handnum);
 				}
 
@@ -3108,7 +3120,7 @@ s32 bgunTickIncChangeGun(struct handweaponinfo *info, s32 handnum, struct hand *
 		}
 
 		if (hand->count == 0) {
-			if (g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) {
+			if ((g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) || BODYVIEW_TRACKSWEAPONS()) {
 				playermgrCreateWeapon(handnum);
 			}
 
@@ -4467,6 +4479,9 @@ void bgun0f09ebcc(struct defaultobj *obj, struct coord *coord, RoomNum *rooms, M
 
 		if (obj->hidden & OBJHFLAG_PROJECTILE) {
 			obj->projectile->flags |= PROJECTILEFLAG_AIRBORNE;
+#ifdef PD_GRAVITY
+			obj->projectile->flags |= PROJECTILEFLAG_LAUNCHED; // MOD: gravity - thrown or fired: original gravity
+#endif
 			obj->projectile->ownerprop = prop;
 
 			projectileSetSticky(objprop);
@@ -5568,7 +5583,7 @@ void bgunFreeWeapon(s32 handnum)
 		}
 	}
 
-	if (g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) {
+	if ((g_Vars.mplayerisrunning && (IS8MB() || PLAYERCOUNT() != 1)) || BODYVIEW_TRACKSWEAPONS()) {
 		playermgrDeleteWeapon(handnum);
 	}
 

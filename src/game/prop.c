@@ -46,6 +46,9 @@
 #include "lib/lib_317f0.h"
 #include "data.h"
 #include "types.h"
+#ifndef PLATFORM_N64
+#include "system.h" // MOD: room prop list limit - sysLogPrintf
+#endif
 
 s16 *g_RoomPropListChunkIndexes;
 struct roomproplistchunk *g_RoomPropListChunks;
@@ -3475,6 +3478,23 @@ void roomGetProps(RoomNum *rooms, s16 *propnums, s32 len)
 					}
 
 					if (ptr == writeptr) {
+#ifndef PLATFORM_N64
+						// MOD: room prop list limit - len was never checked: with
+						// hundreds of bodies it overran the caller's array. Room is
+						// kept for the -1 at the end.
+						if (writeptr - propnums >= len - 1) {
+							static bool logged = false;
+
+							if (!logged) {
+								logged = true;
+								sysLogPrintf(LOG_WARNING, "PROPS: more than %d props in a room's list: the rest are left out", len - 1);
+							}
+
+							*writeptr = -1;
+							return;
+						}
+#endif
+
 						// Prop is not in the list, so insert it
 						writeptr++;
 						writeptr[-1] = propnum;

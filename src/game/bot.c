@@ -33,6 +33,80 @@
 #include "lib/anim.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: combat simulator ragdolls
+#endif
+
+#ifndef PLATFORM_N64
+/**
+ * MOD: high framerates - some simulant logic runs once per tick or counts
+ * the frame's diffframe60, both tuned for one tick per 60th (or slower):
+ * - the sight timers (shootdelaytimer60, the aim "temperature"),
+ * - the line of sight check (one player per tick, in turn),
+ * - the route to the target (one simulant per tick, in turn),
+ * - the critical pickup checks (random rolls),
+ * - which player the line of sight check looks at next, and a (re)spawned
+ *   simulant's first tick (see botStartFirstTick).
+ * Above 60 FPS the checks ran up to 4 times as often, so simulants noticed
+ * you, turned to you and settled their aim up to 4 times sooner. Counting
+ * diffframe60 alone lost the remainder, so a simulant off screen (ticked only
+ * every few frames) could also never reach its shoot delay.
+ * Each simulant now carries the remainder of the frame time over its ticks
+ * (botStartTick): the timers count whole 60ths and the checks run on the
+ * ticks a 60th completes. At 60 FPS or slower it's diffframe60 as before.
+ * A simulant ticked off screen counts the frame time of the ticks it gets, as
+ * at 60 FPS (where it falls behind real time).
+ */
+extern struct chrdata *g_MpBotChrPtrs[MAX_BOTS];
+static s32 g_BotTick60;
+static u8 g_BotTickRem240[MAX_BOTS];
+
+static void botStartTick(struct chrdata *chr)
+{
+	s32 i;
+
+	g_BotTick60 = g_Vars.diffframe60;
+
+	if (g_Vars.diffframe240 >= 4) {
+		return;
+	}
+
+	for (i = 0; i < MAX_BOTS; i++) {
+		if (g_MpBotChrPtrs[i] == chr) {
+			s32 rem = g_BotTickRem240[i] + g_Vars.diffframe240;
+
+			g_BotTick60 = rem / 4;
+			g_BotTickRem240[i] = rem % 4;
+			return;
+		}
+	}
+}
+
+/**
+ * A (re)spawned simulant's first tick completes a 60th, as at 60 FPS. Its
+ * distances and sight of the others are cleared on respawn and the first
+ * tick's line of sight check fills one in. Without a check on that tick the
+ * simulant took index 0 (the first player) as its "closest" target and kept
+ * hunting them out of sight: at 240 FPS simulants went for the player ~60%
+ * more often.
+ */
+static void botStartFirstTick(struct chrdata *chr)
+{
+	s32 i;
+
+	for (i = 0; i < MAX_BOTS; i++) {
+		if (g_MpBotChrPtrs[i] == chr) {
+			g_BotTickRem240[i] = 3;
+		}
+	}
+}
+
+#define BOTFRAME60 g_BotTick60
+#define BOTSTEP60 (g_Vars.diffframe240 >= 4 || g_BotTick60 > 0)
+#else
+#define BOTFRAME60 g_Vars.diffframe60
+#define BOTSTEP60 true
+#endif
 
 #define PICKUPCRITERIA_DEFAULT  0
 #define PICKUPCRITERIA_CRITICAL 1
@@ -232,6 +306,13 @@ void botSpawn(struct chrdata *chr, u8 respawning)
 	struct aibot *aibot = chr->aibot;
 	struct coord pos;
 	RoomNum rooms[8];
+#ifdef PD_PHYSICS
+
+	// MOD: combat simulator ragdolls - the body it leaves stays (or goes) before the chr is reused
+	if (respawning) {
+		ragdollOnCombatantRespawn(chr, NULL);
+	}
+#endif
 
 	if (chr->prop) {
 		prop = chr->prop->child;
@@ -249,6 +330,9 @@ void botSpawn(struct chrdata *chr, u8 respawning)
 
 	if (aibot) {
 		botReset(chr, respawning);
+#ifndef PLATFORM_N64
+		botStartFirstTick(chr); // MOD: high framerates
+#endif
 		splatResetChr(chr);
 		thing = scenarioChooseSpawnLocation(chr->radius, &pos, rooms, chr->prop);
 		chr->hidden |= CHRHFLAG_WARPONSCREEN;
@@ -1346,11 +1430,11 @@ void botSetTarget(struct chrdata *botchr, s32 propnum)
 	} else {
 		if (botchr->aibot->targetinsight) {
 			if (g_Vars.lvupdate240 > 0) {
-				botchr->aibot->shootdelaytimer60 += g_Vars.diffframe60;
+				botchr->aibot->shootdelaytimer60 += BOTFRAME60;
 			}
 		} else {
 			if (g_Vars.lvupdate240 > 0) {
-				botchr->aibot->shootdelaytimer60 -= g_Vars.diffframe60;
+				botchr->aibot->shootdelaytimer60 -= BOTFRAME60;
 			}
 
 			if (botchr->aibot->shootdelaytimer60 < 0) {
@@ -1424,9 +1508,9 @@ void bot0f192a74(struct chrdata *chr)
 
 	if (g_Vars.lvupdate240 > 0) {
 		if (aibot->targetinsight) {
-			aibot->targetinsighttemperature += g_Vars.diffframe60;
+			aibot->targetinsighttemperature += BOTFRAME60;
 		} else {
-			aibot->targetinsighttemperature -= g_Vars.diffframe60;
+			aibot->targetinsighttemperature -= BOTFRAME60;
 		}
 
 		tmp = g_BotDifficulties[diff].unk10 * (aibot->speedtheta * g_Vars.lvupdate60f);
@@ -1551,11 +1635,15 @@ void botChooseGeneralTarget(struct chrdata *botchr)
 
 	// Advance the bot's internal pointer to the next chr
 	// and update stats about that chr
-	aibot->queryplayernum = (aibot->queryplayernum + 1) % g_MpNumChrs;
+	// MOD: high framerates - only on the ticks that check it (it skipped
+	// chrs: with 4 or 8 in the match it checked the same one forever)
+	if (BOTSTEP60) {
+		aibot->queryplayernum = (aibot->queryplayernum + 1) % g_MpNumChrs;
+	}
 
 	trychr = mpGetChrFromPlayerIndex(aibot->queryplayernum);
 
-	if (trychr != botchr) {
+	if (trychr != botchr && BOTSTEP60) { // MOD: high framerates
 		// This condition passes on average once every 4 minutes per player.
 		// However, the usage of canseecloaked appears to be botched.
 		// It is implemented in botIsTargetInvisible, but that function is not
@@ -2248,6 +2336,12 @@ struct prop *botFindPickup(struct chrdata *chr, s32 criteria)
  */
 bool botCanDoCriticalPickup(struct chrdata *chr)
 {
+#ifndef PLATFORM_N64
+	if (!BOTSTEP60) {
+		return false; // MOD: high framerates - (its random rolls) once per 60th
+	}
+#endif
+
 	return botFindPickup(chr, PICKUPCRITERIA_CRITICAL) != NULL;
 }
 
@@ -2399,6 +2493,10 @@ s32 botGetNumOpponentsInHill(struct chrdata *chr)
 void botTickUnpaused(struct chrdata *chr)
 {
 	s32 newaction = -1;
+
+#ifndef PLATFORM_N64
+	botStartTick(chr); // MOD: high framerates
+#endif
 
 	if (!chrIsDead(chr)) {
 		struct aibot *aibot = chr->aibot;
@@ -3323,7 +3421,12 @@ void botTickUnpaused(struct chrdata *chr)
 		// route to them, even if it won't be followed
 		botChooseGeneralTarget(chr);
 
+#ifndef PLATFORM_N64
+		// MOD: high framerates - in turn, once per 60th
+		if (BOTSTEP60 && mpPlayerGetIndex(chr) == ((g_Vars.diffframe240 >= 4 ? g_Vars.lvframenum : g_Vars.lvframe60) % g_MpNumChrs) && chr->target != -1) {
+#else
 		if (mpPlayerGetIndex(chr) == (g_Vars.lvframenum % g_MpNumChrs) && chr->target != -1) {
+#endif
 			struct prop *targetprop = chrGetTargetProp(chr);
 			struct waypoint *first = waypointFindClosestToPos(&chr->prop->pos, chr->prop->rooms);
 			struct waypoint *last = waypointFindClosestToPos(&targetprop->pos, targetprop->rooms);

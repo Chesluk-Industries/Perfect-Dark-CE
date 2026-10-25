@@ -75,6 +75,12 @@ extra memp heap|N|memory for unlimited decals and ragdoll bodies
 headroom for unlimited decals and ragdoll corpses|N|memory for unlimited decals and ragdoll bodies
 crash logs|N|crash logs with a backtrace (pd.crash-<date>.log)
 defaults|N|port default: GUI texture filtering off
+short chr navigation|N|original game bug: short characters (Maians, Small Characters) looping at doorways and raised pads
+ladder unblock|N|original game bug: a character caught by the side of a ladder hanging there for good
+crouch navigation|N|original game bug: characters looping in crawl spaces (Warehouse vents)
+room mismatch fallback|N|original game bug: a step into a spot with mismatched room data refused for good (60 FPS)
+room at the feet|N|original game bug: characters falling through the floor where a low room meets a taller one
+gravity|N|gravity settings (Extended > Physics > Gravity: Gravity and Player Gravity)
 #
 # --- R: ragdoll / physics ---
 ragdoll physics|R|the ragdoll module and its hooks in the game

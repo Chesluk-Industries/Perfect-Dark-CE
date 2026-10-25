@@ -24,6 +24,65 @@
 #include "lib/joy.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_PHYSICS
+#include "ragdoll.h" // MOD: ragdoll physics
+#endif
+
+#ifdef PD_PHYSICS
+/**
+ * MOD: ragdoll physics - hoverbike runs over. How far the bike has really
+ * moved lately (its own speed can build up while it's pushed against
+ * someone): an odometer sampled each tick, by g_Vars.lvframe240.
+ */
+#define BIKEODO_SAMPLES 128
+
+static struct {
+	s32 frame240;
+	f32 odo;
+} g_BikeOdo[BIKEODO_SAMPLES];
+static s32 g_BikeOdoNext;
+static s32 g_BikeOdoCount;
+static f32 g_BikeOdoTotal;
+
+static void bbikeOdoReset(void)
+{
+	g_BikeOdoNext = 0;
+	g_BikeOdoCount = 0;
+	g_BikeOdoTotal = 0.0f;
+}
+
+static void bbikeOdoAdd(f32 dist)
+{
+	g_BikeOdoTotal += dist;
+	g_BikeOdo[g_BikeOdoNext].frame240 = g_Vars.lvframe240;
+	g_BikeOdo[g_BikeOdoNext].odo = g_BikeOdoTotal;
+	g_BikeOdoNext = (g_BikeOdoNext + 1) % BIKEODO_SAMPLES;
+
+	if (g_BikeOdoCount < BIKEODO_SAMPLES) {
+		g_BikeOdoCount++;
+	}
+}
+
+// Distance travelled over the last 'ticks240' 240ths (less if there's no
+// record that old: just mounted)
+static f32 bbikeRecentDistance(s32 ticks240)
+{
+	s32 i;
+	f32 since = g_BikeOdoTotal;
+
+	for (i = 1; i <= g_BikeOdoCount; i++) {
+		s32 index = (g_BikeOdoNext - i + BIKEODO_SAMPLES) % BIKEODO_SAMPLES;
+
+		since = g_BikeOdo[index].odo;
+
+		if (g_Vars.lvframe240 - g_BikeOdo[index].frame240 >= ticks240) {
+			break;
+		}
+	}
+
+	return g_BikeOdoTotal - since;
+}
+#endif
 
 void bbikeInit(void)
 {
@@ -67,6 +126,10 @@ void bbikeInit(void)
 	objFreeEmbedmentOrProjectile(g_Vars.currentplayer->hoverbike);
 
 	hoverbike->base.hidden |= OBJHFLAG_MOUNTED;
+
+#ifdef PD_PHYSICS
+	bbikeOdoReset(); // MOD: ragdoll physics - hoverbike runs over
+#endif
 }
 
 void bbikeExit(void)
@@ -496,7 +559,17 @@ s32 bbikeCalculateNewPositionWithPush(struct coord *arg0, f32 arg1)
 
 		if (obstacle && g_Vars.lvupdate240 > 0) {
 			if (obstacle->type == PROPTYPE_CHR) {
-				// empty
+#ifdef PD_PHYSICS
+				// MOD: ragdoll physics - going fast enough, the bike runs the chr
+				// over (killed, thrown as a ragdoll) and carries on
+				struct hoverbikeobj *hoverbike = (struct hoverbikeobj *) g_Vars.currentplayer->hoverbike->obj;
+
+				// (how far it really went in the last half second, not its speed)
+				if (obstacle->chr && ragdollOnBikeHitChr(obstacle->chr, g_Vars.currentplayer->hoverbike,
+							hoverbike->speed[0], hoverbike->speed[1], bbikeRecentDistance(TICKS(120)))) {
+					result = bbikeCalculateNewPosition(arg0, arg1);
+				}
+#endif
 			} else if (obstacle->type == PROPTYPE_PLAYER) {
 				// empty
 			} else if (obstacle->type == PROPTYPE_OBJ) {
@@ -933,6 +1006,12 @@ void bbikeTick(void)
 
 		bike->speed[0] = sp1f8;
 		bike->speed[1] = sp1f4;
+
+#ifdef PD_PHYSICS
+		// MOD: ragdoll physics - hoverbike runs over
+		bbikeOdoAdd(sqrtf((bike->base.prop->pos.x - bike->prevpos[0]) * (bike->base.prop->pos.x - bike->prevpos[0])
+					+ (bike->base.prop->pos.z - bike->prevpos[1]) * (bike->base.prop->pos.z - bike->prevpos[1])));
+#endif
 
 		hovTick(obj, &bike->hov);
 		func0f069c70(obj, true, true);

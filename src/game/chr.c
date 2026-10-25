@@ -51,6 +51,9 @@
 #include "gbiex.h"
 #include "types.h"
 #ifndef PLATFORM_N64
+#include "bodyview.h" // MOD: body awareness
+#endif
+#ifndef PLATFORM_N64
 #include "video.h"
 #include "game/lv.h" // MOD: high framerates - LV_STEPS240
 #endif
@@ -204,11 +207,76 @@ void chrSetPerimEnabled(struct chrdata *chr, bool enable)
 	}
 }
 
+#ifndef PLATFORM_N64
+/**
+ * MOD: room at the feet - a chr's rooms are the rooms on its way (through
+ * portals) whose box contains its root; if none does, any room whose box
+ * covers the point. A low room can be shorter than a chr's root is high: the
+ * Warehouse crawl tunnels are 100 high (floor 550, box top 650) and a chr
+ * steps in from the corridor with its root at 650-660. Its rooms became only
+ * the big hall around them (room 2), which has no floor there, and it fell
+ * out of the level. The rooms on the way that contain the chr's feet are
+ * added to them.
+ */
+static void chrAddFeetRooms(struct chrdata *chr, struct coord *frompos, RoomNum *fromrooms, struct coord *pos, RoomNum *rooms)
+{
+	struct coord feet = *pos;
+	RoomNum feetrooms[8];
+	s32 len;
+	s32 i;
+	s32 j;
+
+	feet.y = chr->manground + 10.0f;
+
+	if (feet.y >= pos->y) {
+		return;
+	}
+
+	func0f065d1c(frompos, fromrooms, &feet, feetrooms, NULL, 0);
+
+	for (len = 0; rooms[len] != -1; len++);
+
+	for (i = 0; feetrooms[i] != -1 && len < 7; i++) {
+		for (j = 0; j < len; j++) {
+			if (rooms[j] == feetrooms[i]) {
+				break;
+			}
+		}
+
+		if (j == len) {
+			rooms[len++] = feetrooms[i];
+			rooms[len] = -1;
+		}
+	}
+}
+
+/**
+ * func0f065dfc (the rooms on the way to dstpos, else any room covering it)
+ * with the rooms at the chr's feet.
+ */
+static void chrFindMoveRooms(struct chrdata *chr, struct coord *dstpos, RoomNum *dstrooms, RoomNum *morerooms, u32 maxmore)
+{
+	struct prop *prop = chr->prop;
+
+	func0f065d1c(&prop->pos, prop->rooms, dstpos, dstrooms, morerooms, maxmore);
+	chrAddFeetRooms(chr, &prop->pos, prop->rooms, dstpos, dstrooms);
+
+	if (dstrooms[0] == -1) {
+		func0f065e98(&prop->pos, prop->rooms, dstpos, dstrooms);
+
+		if (morerooms) {
+			roomsAppend(dstrooms, morerooms, maxmore);
+		}
+	}
+}
+#endif
+
 /**
  * When a chr is being pushed by a player, this function is called with the new
  * pos and rooms for the chr. It does collision checks and updates dstpos and
  * dstrooms to valid ones if needed.
  */
+
 void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dstrooms, bool arg3)
 {
 	f32 ymax;
@@ -258,7 +326,11 @@ void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dst
 		}
 	}
 
+#ifndef PLATFORM_N64
+	chrFindMoveRooms(chr, dstpos, dstrooms, sp84, 20); // MOD: room at the feet
+#else
 	func0f065dfc(&prop->pos, prop->rooms, dstpos, dstrooms, sp84, 20);
+#endif
 
 #if VERSION < VERSION_NTSC_1_0
 	for (i = 0; dstrooms[i] != -1; i++) {
@@ -281,6 +353,16 @@ void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dst
 		if (cdresult == CDRESULT_NOCOLLISION) {
 			cdresult = cdExamCylMove01(&prop->pos, dstpos, radius, dstrooms, CDTYPE_ALL, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y);
 		}
+#ifndef PLATFORM_N64
+		else if (cdresult == CDRESULT_ERROR) {
+			// MOD: room mismatch fallback - nothing in the way, but the rooms
+			// the move passes into don't match the rooms around the destination
+			// (Warehouse vents: rooms 40/24 -> none vs 2). The chr was kept in
+			// place for good. A step of half the radius or less never checks the
+			// rooms (at 240 FPS every step is that small), so test it like one.
+			cdresult = cdExamCylMove01(&prop->pos, dstpos, radius, sp84, CDTYPE_ALL, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y);
+		}
+#endif
 	} else {
 		cdresult = cdExamCylMove01(&prop->pos, dstpos, radius, sp84, CDTYPE_ALL, CHECKVERTICAL_YES, ymax - prop->pos.y, ymin - prop->pos.y);
 	}
@@ -324,7 +406,11 @@ void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dst
 				sp44.y = dstpos->y;
 				sp44.z = sp54.z * value + prop->pos.z;
 
+#ifndef PLATFORM_N64
+				chrFindMoveRooms(chr, &sp44, dstrooms, sp84, 20); // MOD: room at the feet
+#else
 				func0f065dfc(&prop->pos, prop->rooms, &sp44, dstrooms, sp84, 20);
+#endif
 
 #if VERSION < VERSION_NTSC_1_0
 				for (j = 0; dstrooms[j] != -1; j++) {
@@ -380,7 +466,11 @@ void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dst
 						sp44.y = dstpos->y;
 						sp44.z = sp54.z * value + prop->pos.z;
 
+#ifndef PLATFORM_N64
+						chrFindMoveRooms(chr, &sp44, dstrooms, sp84, 20); // MOD: room at the feet
+#else
 						func0f065dfc(&prop->pos, prop->rooms, &sp44, dstrooms, sp84, 20);
+#endif
 
 #if VERSION < VERSION_NTSC_1_0
 						for (k = 0; dstrooms[k] != -1; k++) {
@@ -434,7 +524,11 @@ void chrCalculatePushPos(struct chrdata *chr, struct coord *dstpos, RoomNum *dst
 							sp44.y = dstpos->y;
 							sp44.z = sp54.z * value + prop->pos.z;
 
+#ifndef PLATFORM_N64
+							chrFindMoveRooms(chr, &sp44, dstrooms, sp84, 20); // MOD: room at the feet
+#else
 							func0f065dfc(&prop->pos, prop->rooms, &sp44, dstrooms, sp84, 20);
+#endif
 
 #if VERSION < VERSION_NTSC_1_0
 							for (l = 0; dstrooms[l] != -1; l++) {
@@ -524,6 +618,39 @@ bool chr0f01f264(struct chrdata *chr, struct coord *pos, RoomNum *rooms, f32 arg
 
 	return result == CDRESULT_NOCOLLISION;
 }
+
+#ifndef PLATFORM_N64
+/**
+ * MOD: ladder unblock - a walking chr that comes within reach of a ladder
+ * climbs it, and while climbing it can't move sideways. Caught by the side of
+ * a ladder (seen with Maian simulants on Base) the climb hit the platform
+ * above and the chr hung there for good. A chr whose climb is blocked lets go
+ * of ladders for a second, so it walks on.
+ */
+#define LADDERBLOCK_SLOTS 64
+
+static struct {
+	s16 chrnum;
+	s32 frame60;
+} g_LadderBlocked[LADDERBLOCK_SLOTS];
+
+static bool chrLadderBlocked(struct chrdata *chr)
+{
+	s32 i = chr->chrnum & (LADDERBLOCK_SLOTS - 1);
+
+	return g_LadderBlocked[i].chrnum == chr->chrnum
+		&& g_Vars.lvframe60 >= g_LadderBlocked[i].frame60
+		&& g_Vars.lvframe60 - g_LadderBlocked[i].frame60 < 60;
+}
+
+static void chrSetLadderBlocked(struct chrdata *chr)
+{
+	s32 i = chr->chrnum & (LADDERBLOCK_SLOTS - 1);
+
+	g_LadderBlocked[i].chrnum = chr->chrnum;
+	g_LadderBlocked[i].frame60 = g_Vars.lvframe60;
+}
+#endif
 
 bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f32 *mangroundptr)
 {
@@ -622,7 +749,11 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 			arg2->z = arg1->z + move[1];
 		}
 
+#ifndef PLATFORM_N64
+		if ((chr->actiontype == ACT_PATROL || chr->actiontype == ACT_GOPOS) && !chrLadderBlocked(chr)) { // MOD: ladder unblock
+#else
 		if (chr->actiontype == ACT_PATROL || chr->actiontype == ACT_GOPOS) {
+#endif
 			chr->onladder = cdFindLadder(&chr->prop->pos, chr->radius * 2.5f,
 					chr->manground + chr->height - chr->prop->pos.y,
 					chr->manground + 1.0f - chr->prop->pos.y,
@@ -824,6 +955,11 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 				if (chr0f01f264(chr, arg2, spfc, yincrement, true)) {
 					chr->manground += yincrement;
 				}
+#ifndef PLATFORM_N64
+				else if (yincrement > 0.0f) {
+					chrSetLadderBlocked(chr); // MOD: ladder unblock
+				}
+#endif
 #else
 				if (chr0f01f264(chr, arg2, spfc, yincrement)) {
 					chr->manground += yincrement;
@@ -960,6 +1096,9 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 								}
 
 								chrDie(chr, shooter);
+#ifdef PD_PHYSICS
+								ragdollOnBotDeath(chr, NULL, HITPART_GENERAL, NULL); // MOD: combat simulator ragdolls
+#endif
 							} else {
 								chr->hidden |= CHRHFLAG_DELETING;
 							}
@@ -1009,6 +1148,9 @@ bool chr0f01f378(struct model *model, struct coord *arg1, struct coord *arg2, f3
 						arg2->y += chr->manground - manground;
 
 						func0f065e74(&spd0, spc0, arg2, spfc);
+#ifndef PLATFORM_N64
+						chrAddFeetRooms(chr, &spd0, spc0, arg2, spfc); // MOD: room at the feet
+#endif
 						chr0f021fa8(chr, arg2, spfc);
 					}
 #endif
@@ -2528,6 +2670,15 @@ s32 chrTick(struct prop *prop)
 				if (chr->model == NULL) {
 					return TICKOP_FREE;
 				}
+#ifdef PD_PHYSICS
+
+				// MOD: combat simulator ragdolls - the chr respawned during its
+				// tick and left its old model to a corpse chr: carry on with the
+				// new one (the shot checks crashed on its unset matrices)
+				if (chr->model != model) {
+					model = chr->model;
+				}
+#endif
 			}
 
 			if (var80062974) {
@@ -3568,7 +3719,13 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 		s32 colour[4]; // rgba levels, but allowing > 256 temporarily
 		u32 stack;
 
+#ifndef PLATFORM_N64
+		// MOD: body awareness - no cloak or shield effects on your own body
+		// (drawn where the body really is, around the view)
+		if (xlupass && chr->cloakfadefrac > 0 && !chr->cloakfadefinished && !bodyViewIsOwnBody(chr)) {
+#else
 		if (xlupass && chr->cloakfadefrac > 0 && !chr->cloakfadefinished) {
+#endif
 			gdl = chrRenderCloak(gdl, chr->prop, chr->prop);
 		}
 
@@ -3702,6 +3859,17 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 			var8005efc4 = chr0f024b18;
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: body awareness - your own body in first person, without its
+		// head, arms or held objects
+		if (bodyViewIsOwnBody(chr)) {
+			if (bodyViewBeginDraw(model)) {
+				modelRender(&renderdata, model);
+				bodyViewEndDraw(model);
+			}
+		} else
+#endif
+		{
 		// Render the chr's model
 		modelRender(&renderdata, model);
 
@@ -3711,6 +3879,7 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 		while (child) {
 			chrRenderAttachedObject(child, &renderdata, xlupass, chr);
 			child = child->next;
+		}
 		}
 #ifdef PD_PHYSICS
 
@@ -3727,7 +3896,12 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 
 		// Render shadow
 		if (xlupass) {
+#ifndef PLATFORM_N64
+			// MOD: body awareness - no shadow under your own body
+			if (!chr->onladder && chr->actiontype != ACT_SKJUMP && !bodyViewIsOwnBody(chr)) {
+#else
 			if (!chr->onladder && chr->actiontype != ACT_SKJUMP) {
+#endif
 				s32 shadowalpha = 0;
 
 				if (chr->ground == 0) {
@@ -3779,6 +3953,11 @@ Gfx *chrRender(struct prop *prop, Gfx *gdl, bool xlupass)
 
 			mtxF2LBulk(model->matrices, model->definition->nummatrices);
 
+#ifndef PLATFORM_N64
+			if (bodyViewIsOwnBody(chr)) {
+				// MOD: body awareness - no shield effect (see the cloak above)
+			} else
+#endif
 			if (USINGDEVICE(DEVICE_IRSCANNER)) {
 				gdl = chrRenderShield(gdl, chr, 0x80);
 			} else {

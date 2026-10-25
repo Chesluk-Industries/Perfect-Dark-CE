@@ -83,6 +83,9 @@
 #ifdef PD_PHYSICS
 #include "ragdoll.h" // MOD: ragdoll physics
 #endif
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 void rng2SetSeed(u32 seed);
 
@@ -3823,6 +3826,9 @@ void projectileFall(struct defaultobj *obj, f32 arg1[3][3])
 		projectile->flags &= ~PROJECTILEFLAG_AIRBORNE;
 		projectile->flags |= PROJECTILEFLAG_FALLING;
 		projectile->flags &= ~PROJECTILEFLAG_STICKY;
+#ifdef PD_GRAVITY
+		projectile->flags &= ~PROJECTILEFLAG_LAUNCHED; // MOD: gravity - falling as an item now
+#endif
 
 		mtx3ToMtx4(obj->realrot, &sp148);
 		mtx4GetRotation(sp148.m, &sp188);
@@ -7091,15 +7097,58 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 
 					projectile->speed.y += (projectile->unk014 + projectile->unk01c) * g_Vars.lvupdate60freal;
 
+#ifdef PD_GRAVITY
+					// MOD: gravity - items follow Gravity; thrown or fired
+					// projectiles keep the original
+					f32 gscale = (projectile->flags & PROJECTILEFLAG_LAUNCHED) ? 1.0f : gravityScale();
+
+					if (projectile->flags & PROJECTILEFLAG_LIGHTWEIGHT) {
+						f0 = projectile->speed.y - (1.0f / 7.2f) * gscale * g_Vars.lvupdate60freal;
+					} else {
+						f0 = projectile->speed.y - (1.0f / 3.6f) * gscale * g_Vars.lvupdate60freal;
+					}
+#else
 					if (projectile->flags & PROJECTILEFLAG_LIGHTWEIGHT) {
 						f0 = projectile->speed.y - (1.0f / 7.2f) * g_Vars.lvupdate60freal;
 					} else {
 						f0 = projectile->speed.y - (1.0f / 3.6f) * g_Vars.lvupdate60freal;
 					}
+#endif
 
 					sp5dc.y += g_Vars.lvupdate60freal * (projectile->speed.y + f0) * 0.5f;
 
 					projectile->speed.y = f0;
+
+#ifdef PD_GRAVITY
+					// MOD: gravity - an item rising stops at the ceilings ragdolls
+					// collide with (the game's collision has no ceilings): at low
+					// gravity a knocked item flew up for good, and even at the
+					// original gravity one knocked up hard enough went through.
+					// Inverted, it stays under the ceiling, resting there, not
+					// lost in flight (40 s limit). Thrown or fired ones are as
+					// before.
+					if ((projectile->flags & PROJECTILEFLAG_LAUNCHED) == 0 && sp5dc.y > prop->pos.y) {
+						f32 ceily;
+
+						// Something in the way above (the game's collision) holds it
+						// without stopping its speed: it would keep growing
+						if (gscale < 0.0f && projectile->speed.y > 10.0f) {
+							projectile->speed.y = 10.0f;
+						}
+
+						if (gravityItemCeiling(prop, projectile, &sp5dc, &ceily)) {
+							sp5dc.y = ceily;
+
+							if (gscale < 0.0f) {
+								projectile->speed.y = 0.0f;
+								projectile->losttimer240 = 0;
+							} else if (projectile->speed.y > 0.0f) {
+								// Bounces off it, down
+								projectile->speed.y *= -0.3f;
+							}
+						}
+					}
+#endif
 				} else {
 					projectile->speed.y += (projectile->unk014 + projectile->unk01c) * g_Vars.lvupdate60freal;
 					sp5dc.y += projectile->speed.y * g_Vars.lvupdate60freal;
@@ -7110,6 +7159,13 @@ s32 projectileTick(struct defaultobj *obj, bool *embedded)
 
 				sp5dc.x += projectile->speed.x * g_Vars.lvupdate60freal;
 				sp5dc.z += projectile->speed.z * g_Vars.lvupdate60freal;
+
+#ifdef PD_GRAVITY
+				// MOD: gravity - and bounces off the walls ragdolls collide with
+				if ((projectile->flags & (PROJECTILEFLAG_POWERED | PROJECTILEFLAG_LAUNCHED)) == 0 && gravityScale() != 1.0f) {
+					gravityItemWall(prop, &sp5dc, &projectile->speed);
+				}
+#endif
 
 				mtx3ToMtx4(obj->realrot, &sp30c);
 				func0f096698(&sp30c, &projectile->mtx, g_Vars.lvupdate240);
@@ -8554,6 +8610,16 @@ void liftTick(struct prop *prop)
 		// Lift is at the aim stop
 		door = lift->doors[lift->levelcur];
 
+#ifndef PLATFORM_N64
+		// MOD: high framerates - a lift sets off for its next stop on whole
+		// 60ths only. Level scripts run on whole 60ths, and some stop a lift
+		// when they see it standing at a stop (Air Force One's cargo bay lift:
+		// "if lift stationary, deactivate it"). Above 60 FPS the lift picked
+		// its next stop and was moving again within the frames between two
+		// script runs, so the script never saw it stop and it went straight
+		// back down. At 60 FPS every tick is a whole 60th: as before.
+		if (g_Vars.lvupdate60 > 0)
+#endif
 		if (!door || (doorIsClosed(door) && door->keyflags == 0)) {
 			// Find next stop
 			stop = lift->levelaim;
@@ -14859,6 +14925,15 @@ void objSetDropped(struct prop *prop, u32 droptype)
 			obj->embedment->projectile->droptype = droptype;
 		} else if (obj->hidden & OBJHFLAG_PROJECTILE) {
 			obj->projectile->droptype = droptype;
+#ifdef PD_GRAVITY
+			// MOD: gravity - a guard's grenade throw keeps the original
+			// gravity; anything else dropped is an item
+			if (droptype == DROPTYPE_THROWGRENADE) {
+				obj->projectile->flags |= PROJECTILEFLAG_LAUNCHED;
+			} else {
+				obj->projectile->flags &= ~PROJECTILEFLAG_LAUNCHED;
+			}
+#endif
 		}
 
 		if (g_Vars.lvmpbotlevel
@@ -15821,6 +15896,10 @@ void glassDestroy(struct defaultobj *obj)
 	obj->damage = 0;
 	obj->hidden |= OBJHFLAG_DELETING;
 	obj->hidden2 |= OBJH2FLAG_DESTROYED;
+#ifdef PD_PHYSICS
+
+	ragdollOnGlassBroken(prop); // MOD: ragdoll physics - bodies lying on it fall
+#endif
 }
 
 void doorDestroyGlass(struct doorobj *door)

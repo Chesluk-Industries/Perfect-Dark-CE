@@ -27,6 +27,12 @@
 #include "system.h"
 #include "input.h"
 #include "mpsetups.h"
+#ifdef PD_PHYSICS
+extern struct menudialogdef g_ExtendedPhysicsMenuDialog; // MOD: ragdoll physics (optionsmenu.c)
+#endif
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 
 struct menuitem g_MpCharacterMenuItems[];
 struct menudialogdef g_MpAddSimulantMenuDialog;
@@ -6197,6 +6203,27 @@ struct menuitem g_MpExtGameOptionsMenuItems[] = {
 		MPOPTION_NODOORS,
 		menuhandlerMpCheckboxOption,
 	},
+#ifdef PD_PHYSICS
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Physics...\n",
+		0,
+		(void *)&g_ExtendedPhysicsMenuDialog, // MOD: ragdoll physics - shortcut to Extended > Physics (gravity included)
+	},
+#elif defined(PD_GRAVITY)
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Gravity...\n",
+		0,
+		(void *)&g_GravityMenuDialog, // MOD: gravity - shortcut to Extended > Gravity
+	},
+#endif
 	{ MENUITEMTYPE_END },
 };
 

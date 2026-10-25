@@ -71,6 +71,10 @@
 #include "data.h"
 #include "types.h"
 #ifndef PLATFORM_N64
+#include "namebanner.h" // MOD: name banner
+#include "bodyview.h" // MOD: body awareness
+#endif
+#ifndef PLATFORM_N64
 #include "video.h"
 #include "input.h"
 #include "platform.h"
@@ -1400,7 +1404,13 @@ void playerTickChrBody(void)
 			headnum = HEAD_DARK_COMBAT;
 		}
 
+#ifndef PLATFORM_N64
+		// MOD: body awareness - the solo body is loaded as the Combat
+		// Simulator's are (not into the gun's memory)
+		if ((!g_Vars.mplayerisrunning || (IS4MB() && PLAYERCOUNT() == 1)) && !bodyViewLoadingSeparately()) {
+#else
 		if (!g_Vars.mplayerisrunning || (IS4MB() && PLAYERCOUNT() == 1)) {
+#endif
 			// 1 player
 			if (g_Vars.currentplayer->gunmem2 == NULL) {
 				if (!var8009dfc0 && bgunChangeGunMem(GUNMEMOWNER_CHRBODY)) {
@@ -1566,7 +1576,11 @@ void playerTickChrBody(void)
 		g_Vars.currentplayer->vv_height = g_Vars.currentplayer->vv_eyeheight;
 
 		if (weaponmodelnum >= 0) {
+#ifndef PLATFORM_N64
+			if (g_Vars.mplayerisrunning == false && !bodyViewLoadingSeparately()) { // MOD: body awareness
+#else
 			if (g_Vars.mplayerisrunning == false) {
+#endif
 				weaponmodeldef = modeldefLoad(g_ModelStates[weaponmodelnum].fileid, allocation + offset1, offset2 - offset1, &texpool);
 				fileGetLoadedSize(g_ModelStates[weaponmodelnum].fileid);
 				modelAllocateRwData(weaponmodeldef);
@@ -1602,6 +1616,12 @@ void playerRemoveChrBody(void)
 			chrRemove(g_Vars.currentplayer->prop, false);
 			g_Vars.currentplayer->model00d4 = NULL;
 			bmoveUpdateRooms(g_Vars.currentplayer);
+#ifndef PLATFORM_N64
+			// MOD: body awareness - a body loaded on its own isn't in the gun's memory
+			if (bodyViewOwnsBody()) {
+				bodyViewBodyRemoved();
+			} else
+#endif
 			bgunFreeGunMem();
 			g_Vars.currentplayer->gunmem2 = NULL;
 		}
@@ -3871,6 +3891,15 @@ void playerTick(bool arg0)
 		if (g_Vars.currentplayer->isdead && ragdollWantPlayerBody()) {
 			playerTickChrBody();
 			ragdollPlayerBodyTick();
+		} else if (bodyViewWantSoloBody()) {
+			bodyViewSoloTick(); // MOD: body awareness
+		} else {
+			playerRemoveChrBody();
+		}
+#elif !defined(PLATFORM_N64)
+		// MOD: body awareness
+		if (bodyViewWantSoloBody()) {
+			bodyViewSoloTick();
 		} else {
 			playerRemoveChrBody();
 		}
@@ -4984,6 +5013,10 @@ Gfx *playerRenderHud(Gfx *gdl)
 		gdl = hudmsgsRender(gdl);
 		gdl = radarRender(gdl);
 #endif
+#ifndef PLATFORM_N64
+		// MOD: name banner - the player's name above the pickup messages (off by default)
+		gdl = nameBannerRender(gdl);
+#endif
 
 		gdl = playerDrawStoredFade(gdl);
 	} else {
@@ -5574,7 +5607,11 @@ s32 playerTickThirdPerson(struct prop *prop)
 			&& player->model00d4
 			&& ((g_Vars.mplayerisrunning && g_Vars.currentplayernum != playernum)
 				|| player->cameramode == CAMERAMODE_EYESPY
-				|| (player->cameramode == CAMERAMODE_THIRDPERSON && player->visionmode == VISIONMODE_SLAYERROCKET))) {
+				|| (player->cameramode == CAMERAMODE_THIRDPERSON && player->visionmode == VISIONMODE_SLAYERROCKET)
+#ifndef PLATFORM_N64
+				|| (g_Vars.currentplayernum == playernum && bodyViewActive(playernum)) // MOD: body awareness
+#endif
+				)) {
 		chr->actiontype = ACT_BONDMULTI;
 
 		if ((chr->hidden & CHRHFLAG_00000800) == 0) {
@@ -5584,7 +5621,12 @@ s32 playerTickThirdPerson(struct prop *prop)
 
 			playerChooseThirdPersonAnimation(chr, bmoveGetCrouchPosByPlayer(playernum), player->speedsideways, player->speedforwards, player->speedtheta, &player->angleoffset, &chr->act_bondmulti.animcfg);
 
-			if (chrIsDead(chr)) {
+			if (chrIsDead(chr)
+#ifndef PLATFORM_N64
+					// MOD: body awareness - in its own view the torso stays upright
+					|| (bodyViewActive(playernum) && PLAYERCOUNT() == 1)
+#endif
+					) {
 				shootrotx = 0;
 				shootroty = 0;
 			} else {
@@ -5619,6 +5661,14 @@ s32 playerTickThirdPerson(struct prop *prop)
 
 		sp8c.x = prop->pos.x;
 		sp8c.z = prop->pos.z;
+#ifndef PLATFORM_N64
+
+		// MOD: body awareness - what the owner's own pass below (which this
+		// replaces) keeps up
+		if (g_Vars.currentplayernum == playernum && bodyViewActive(playernum)) {
+			bodyViewOwnerTick(chr, player);
+		}
+#endif
 
 		modelSetRootPosition(chr->model, &sp8c);
 

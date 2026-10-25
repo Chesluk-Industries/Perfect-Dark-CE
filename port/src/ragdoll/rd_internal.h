@@ -45,6 +45,7 @@
 #include "game/tex.h"
 #include "game/sparks.h"
 #include "game/splat.h"
+#include "game/wallhit.h"
 
 #ifdef PD_PHYSICS
 #include "pdphysics.h"
@@ -370,6 +371,7 @@ struct rdcapvtx {
 
 struct rdcap {
 	s32 part;        // skeleton part the centre/spray is fixed to
+	s32 cut;         // the cut it covers (one end of it)
 	f32 centre[3];   // fan centre, in that part's frame (model units, rest pose)
 	f32 normal[3];   // outwards (spray direction)
 	s32 numedges;    // border of the hole (fan triangles with the centre)
@@ -418,6 +420,8 @@ struct ragdoll {
 	s16 mtxindex[RD_NUMPARTS];         // model matrix index of each part
 	bool powered;                      // motors follow the death animation
 	f32 pushscale;                     // push strength (Ragdoll.RagdollPushScale when it died)
+	bool dk;                           // DK Mode body: big head and long arms (rdDkSpread)
+	u32 cutpaint[RD_NUMPARTS];         // Paintball Mode: each cut's paint colour (RGBA, both ends), 0 = blood
 	f32 musclestrength;                // this body's rolled settings (rdRollRange): stiffness level,
 	f32 muscletime;                    // ... stiffness fade time (s),
 	f32 reflexstrength;                // ... reflex strength
@@ -508,6 +512,12 @@ struct ragdoll {
 	f32 screamprev[3];                 // pelvis last tick
 	bool screamprevset;
 	s32 firstsleep60;                  // age60 it first fell asleep (came to rest) after the death animation, 0 = not yet
+	// MOD: combat simulator ragdolls - Resting Bodies Turn Solid
+	bool solid;                        // static in the physics: collides, never moves
+	f32 restpos[RD_NUMPARTS][3];       // each part last tick
+	bool restset;
+	f32 restspeed;                     // the fastest part's speed last tick (units/s)
+	s32 still60;                       // 60ths every part has been slow and the body done reacting
 };
 
 #define RD_CRASHCTX(what, chrnum, part) \
@@ -572,9 +582,18 @@ struct ragdoll *ragdollFindByHandle(s32 handle);
 void ragdollOnChrDeath(struct chrdata *chr, struct coord *dir, s32 hitpart, struct gset *gset, bool knockout);
 void ragdollOnExplosion(struct chrdata *chr, struct coord *centre, f32 radius, f32 damage);
 s32 ragdollWakeFrozen(struct ragdoll *rd);
+void ragdollUnsolid(struct ragdoll *rd, const char *why); // MOD: combat simulator ragdolls - a solid body moves again
 
 // ragdoll/create.c
 bool ragdollCapturePose(struct ragdoll *rd, struct chrdata *chr);
+// DK Mode (rd->dk): the cheat draws the head 4x and the arms 2.5x, scaled
+// about the neck and the shoulders. The body follows: the joints below a
+// shoulder (elbow, hand) are moved out by the same scale, and the head and
+// arm shapes are scaled (ragdollCreatePhysics).
+#define RD_DK_HEADSCALE 4.0f
+#define RD_DK_ARMSCALE  2.5f
+bool rdDkArmPart(const struct ragdoll *rd, s32 part);
+void rdDkSpread(const struct ragdoll *rd, Mtxf *world);
 f32 rdTorsoLength(struct ragdoll *rd);
 s32 ragdollCreatePhysics(struct ragdoll *rd, const f32 *vel);
 

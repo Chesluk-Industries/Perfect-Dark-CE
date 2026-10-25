@@ -278,8 +278,9 @@ static s32 clipLadderIgnores(const f32 *p)
 }
 
 // Ragdolls always use the generated collision (the game's tiles alone were
-// found to be no use for them in testing), except in the Combat Simulator
-#define CLIP_RAGDOLLMODE (g_ClipForceGame ? CLIPMODE_GAME : CLIPMODE_GENERATED)
+// found to be no use for them in testing). MOD: combat simulator ragdolls -
+// in the Combat Simulator too (only the players keep the game's collision)
+#define CLIP_RAGDOLLMODE ((g_ClipForceGame && !g_RagdollsEnabled) ? CLIPMODE_GAME : CLIPMODE_GENERATED)
 
 static s32 clipStageHasGameCollision(void)
 {

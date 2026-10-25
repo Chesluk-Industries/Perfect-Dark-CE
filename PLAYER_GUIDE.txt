@@ -67,9 +67,16 @@ Contents
       clutch the wound, catch themselves on ledges and protect their head.
     - Strong weapons, explosions and a full shotgun blast to one limb can take
       limbs off (and, rarely, split the body at the waist). Blood sprays from
-      the wounds, and blood splats carry round corners.
+      the wounds, and blood splats carry round corners. With Paintball Mode
+      on, the cut ends are filled with paint colours instead of red and
+      spray paint.
     - Knocked-out guards (tranquilizer, punches) also become ragdolls. They
       stay alive, unless they fall from a great height.
+    - Ride the hoverbike into an enemy with a run-up at close to its top
+      speed and you run him over: he's killed and knocked down a few steps
+      ahead of the bike, and the bike carries on. A slower hit, or revving
+      against him, only bumps him as before. Friendly characters are never
+      run over.
 
   Bodies in the world
     - Bodies slide down steep slopes but stay put on ordinary ramps, float in
@@ -121,20 +128,14 @@ Contents
 
 6. OPTIONS > EXTENDED > PHYSICS
 -------------------------------
-  Defaults are in brackets.
+  Defaults are in brackets. The same menu opens from the Combat Simulator:
+  Options, then More Options > Physics.
 
   Preset [Default]
-    Default puts every physics setting back to this build's defaults. It
-    shows Custom once you change something.
+    Default puts every physics setting back to this build's defaults
+    (gravity included). It shows Custom once you change something.
   Ragdolls [On]
     Off plays exactly like the original game (animated deaths).
-  Push Strength [0.80x]
-    How hard shots, blasts and characters push bodies.
-  Max Bodies [Unlimited]
-    How many corpses stay as ragdolls; past this the oldest fades out.
-  Max Simulated Bodies [Unlimited]
-    How many of them keep moving physically; older ones freeze where they
-    lie. Lower these on a slow PC.
 
   Ragdoll Behaviours...
     Animation Blend [80%]
@@ -176,7 +177,59 @@ Contents
     Grab Bodies and Objects (Hold Use) [On]
     Held Bodies Stop Bullets [On]
     Guards React to Bodies [On]
+    Push Strength [0.80x]
+      How hard shots, blasts and characters push bodies.
     Grab Strength [1.20x]
+
+  Gravity...
+    Gravity [100%]
+      -500% to 500% of the original gravity (1% steps from -100% to
+      100%, 5% steps beyond) for the ragdolls, items (dropped guns,
+      things knocked loose or blown off) and bullet casings, sparks and
+      glass shards. Below 100% falling bodies don't scream. At 0% they
+      drift until they hit something. Below 0% gravity is inverted:
+      bodies and items fall up to the ceiling, and under open sky they
+      leave the level and are removed (as when something falls out of
+      it). Bodies lying still wake up when you change it. Items stop at
+      the same ceilings bodies do (at any gravity, 100% included) and,
+      when it isn't 100%, bounce off the same walls. In low gravity
+      casings still in the air long after they'd normally have landed
+      land without the clink.
+    Player Gravity [100%]
+      5% to 500% (1% steps up to 100%, 5% steps beyond): how fast you,
+      guards and simulants fall. Falling for 4 seconds still kills you;
+      at low gravity it takes longer.
+    What players, simulants and guards throw or fire (grenades, mines,
+    knives, rockets) keeps the original gravity. The Preset's Default puts
+    both back to 100%.
+
+  Performance...
+    Singleplayer / Co-Op
+      Max Bodies [Unlimited]
+        How many corpses stay as ragdolls; past this the oldest fades out.
+        Vanilla: bodies fade away as in the original (off screen, or when
+        too many are in view; about 10 in good conditions). 12 to 256, or
+        Unlimited.
+      Max Active Bodies [Unlimited]
+        How many of them keep moving physically; older ones freeze where
+        they lie. 12 to 256, or Unlimited. Lower these on a slow PC.
+    Combat Simulator
+      Max Bodies [32]
+        Vanilla: a body disappears when its player or simulant respawns, as
+        in the original. 12 to 256, or Unlimited: the body stays where it
+        fell, and past this many the oldest fades out.
+      Max Active Bodies [32]
+        As above, for the Combat Simulator.
+    Resting Bodies Turn Solid [Combat Simulator]
+      Combat Simulator, Both or Off. A body turns solid as soon as it has
+      finished its death reactions and lies still (no part of it still
+      falling or settling). Other bodies still land on a solid body and
+      shots still hit it, but nothing moves it any more, so it costs next
+      to no physics time. Doors pass through solid bodies. Only a moving
+      lift, or glass breaking under it, makes one move again. A body
+      already lying still when its player or simulant respawns turns solid
+      straight away. In singleplayer (Both), picking a solid body up or
+      cutting a limb off it makes it move again too.
 
   Debug...
     H Key Spawns Dummy [Off] ... H spawns a test guard in front of you
@@ -222,6 +275,27 @@ Contents
   Options > Audio > Surround Setup
     A shortcut to the 5.1 settings, shown while Sound is set to Surround.
 
+  Options > Extended > Game > Name Banner... (for each player)
+    Show Name Banner [Off]
+      Your name in a box at the bottom left of the screen, like a pickup
+      message, with a light running round its border. It comes in once
+      the mission starts and goes for cutscenes. In the Combat Simulator
+      it's your profile name; in solo and co-op, the Banner Name below.
+      Based on the banner in murkantor's netplay fork.
+    Colour [Green]
+      Green, Teal/Purple, Red, Blue, Gold or Custom (pd.ini).
+    Banner Name
+      The name on your banner in solo and co-op (up to 15 characters).
+      Until one is set, player 1's banner shows the agent file's name and
+      the others show "Player 2", "Player 3" and "Player 4".
+
+  Options > Extended > Game > Body Awareness [Off] (for each player)
+    Your own body in first person: look down to see your legs and torso,
+    animated as you move. It only shows once you look down past 30
+    degrees, rising into view as you look further down. The head and arms
+    are left out (the first person gun and hands are drawn as usual).
+    Works in solo, co-op and the Combat Simulator.
+
 
 8. THE DEADLY PUNCH CHEAT
 -------------------------
@@ -243,6 +317,23 @@ Contents
     WitnessFieldOfView=1
       1: guards only notice a death within their field of view.
       0: anywhere they have a line of sight (the original).
+    Player1.NameBannerText=
+      The Banner Name (Player2..Player4 too). Empty it here to go back to
+      the default name: the menu's keyboard won't accept an empty name.
+    Player1.NameBannerRGB=00FF00
+    Player1.NameBannerHighlightRGB=80FF80
+      The banner's colours with its Colour on Custom, in hex
+      (RRGGBB): the box and name, and the light running round it.
+    BodyAwarenessBack=32
+      How far behind the view your body is drawn with Body Awareness on
+      (0 to 80). Higher keeps the chest out of the view when looking down.
+      When crouching, the upper body is pushed back further, so the view
+      never ends up inside it.
+    BodyAwarenessPitch=30
+      How far down (degrees, 0 to 80) you must look before your body shows.
+      0 shows it all the time.
+    BodyAwarenessDrop=0
+      Draws your body this much lower (0 to 60).
 
   [Ragdoll]
     RagdollDeathCamControl=1
@@ -291,6 +382,10 @@ Contents
 -------------------------
   - Co-op and Counter-Operative get ragdolls, both death cameras, and the
     full single player effects.
+  - The Combat Simulator has ragdolls too, for players and simulants alike,
+    with the Immersive Death Camera and dismemberment. Bodies can't be
+    grabbed there. Bodies stay after a respawn, up to the Combat Simulator
+    Max Bodies (Physics > Performance; Vanilla: they go with their owner).
   - The Combat Simulator uses the game's own collision for players.
 
 
@@ -298,8 +393,9 @@ Contents
 ---------------------------
   - If the game crashes, it writes pd.crash-<date>-<time>.log (and
     pd.crash.log) next to the exe. Please send it, together with pd.log from
-    run_with_log.bat.
-  - If the game runs slowly with lots of bodies, lower Max Simulated Bodies.
+    run_with_log.bat. If it freezes instead, the same log is written after
+    10 seconds (Windows).
+  - If the game runs slowly with lots of bodies, lower Max Active Bodies.
   - To play as close to the original as possible: Ragdolls off (Player
     Collision is on Vanilla by default) and WitnessFieldOfView=0 in pd.ini.
     Blood still wraps round corners.

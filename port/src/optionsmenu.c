@@ -15,6 +15,11 @@
 #include "input.h"
 #include "config.h"
 #include "audio.h" // MOD: surround 5.1
+#include "namebanner.h" // MOD: name banner
+#include "bodyview.h" // MOD: body awareness
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 #ifdef PD_PHYSICS
 #include "ragdoll.h" // MOD: ragdoll physics
 #endif
@@ -1577,6 +1582,181 @@ MenuItemHandlerResult menuhandlerSurroundSetup(s32 operation, struct menuitem *i
 	return 0;
 }
 
+// MOD: name banner - Extended > Player N Game Options > Name Banner
+// The name on the right of "Banner Name". That slot (param3) takes a text ID
+// or a function, never a literal string, even with MENUITEMFLAG_LITERAL_TEXT.
+static char g_NameBannerMenuValue[NAMEBANNER_MAXTEXT];
+
+static char *nameBannerMenuValue(struct menuitem *item)
+{
+	const char *text = g_NameBannerCfg[g_ExtMenuPlayer].text;
+
+	if (text[0] != '\0') {
+		snprintf(g_NameBannerMenuValue, sizeof(g_NameBannerMenuValue), "%s", text);
+	} else if (g_ExtMenuPlayer == 0) {
+		snprintf(g_NameBannerMenuValue, sizeof(g_NameBannerMenuValue), "(Agent File)");
+	} else {
+		snprintf(g_NameBannerMenuValue, sizeof(g_NameBannerMenuValue), "Player %d", g_ExtMenuPlayer + 1);
+	}
+
+	return g_NameBannerMenuValue;
+}
+
+static MenuItemHandlerResult menuhandlerNameBanner(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_NameBannerCfg[g_ExtMenuPlayer].enabled;
+	case MENUOP_SET:
+		g_NameBannerCfg[g_ExtMenuPlayer].enabled = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerNameBannerColour(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_NameBannerCfg[g_ExtMenuPlayer].enabled;
+	case MENUOP_GETOPTIONCOUNT:
+		data->dropdown.value = NAMEBANNER_NUMCOLOURS;
+		break;
+	case MENUOP_GETOPTIONTEXT:
+		return (intptr_t)nameBannerColourName(data->dropdown.value);
+	case MENUOP_SET:
+		g_NameBannerCfg[g_ExtMenuPlayer].colour = data->dropdown.value;
+		break;
+	case MENUOP_GETSELECTEDINDEX:
+		data->dropdown.value = g_NameBannerCfg[g_ExtMenuPlayer].colour;
+		break;
+	}
+
+	return 0;
+}
+
+// The on-screen keyboard (as the Combat Simulator's Player Name)
+static MenuItemHandlerResult menuhandlerNameBannerText(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	char *name = data->keyboard.string;
+	char *text = g_NameBannerCfg[g_ExtMenuPlayer].text;
+	s32 i;
+
+	switch (operation) {
+	case MENUOP_GETTEXT:
+		for (i = 0; i < NAMEBANNER_MAXTEXT - 1 && text[i] != '\0'; i++) {
+			name[i] = text[i];
+		}
+
+		while (i < NAMEBANNER_MAXTEXT) {
+			name[i++] = '\0';
+		}
+		break;
+	case MENUOP_SETTEXT:
+		for (i = 0; i < NAMEBANNER_MAXTEXT - 1 && name[i] != '\0'; i++) {
+			text[i] = name[i];
+		}
+
+		text[i] = '\0';
+
+		while (i > 0 && text[i - 1] == ' ') {
+			text[--i] = '\0';
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static struct menuitem g_ExtendedNameBannerTextMenuItems[] = {
+	{
+		MENUITEMTYPE_KEYBOARD,
+		NAMEBANNER_MAXTEXT - 1, // max length (0: the game's 10)
+		0,
+		0,
+		0,
+		menuhandlerNameBannerText,
+	},
+	{ MENUITEMTYPE_END },
+};
+
+static struct menudialogdef g_ExtendedNameBannerTextMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Banner Name",
+	g_ExtendedNameBannerTextMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+static struct menuitem g_ExtendedNameBannerMenuItems[] = {
+	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Show Name Banner",
+		0,
+		menuhandlerNameBanner,
+	},
+	{
+		MENUITEMTYPE_DROPDOWN,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Colour",
+		0,
+		menuhandlerNameBannerColour,
+	},
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SELECTABLE_OPENSDIALOG,
+		(uintptr_t)"Banner Name\n", // solo and co-op (the \n: a full line's height)
+		(uintptr_t)&nameBannerMenuValue,
+		(void *)&g_ExtendedNameBannerTextMenuDialog,
+	},
+	{
+		MENUITEMTYPE_SEPARATOR,
+		0,
+		0,
+		0,
+		0,
+		NULL,
+	},
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_SELECTABLE_CLOSESDIALOG,
+		L_OPTIONS_213, // "Back"
+		0,
+		NULL,
+	},
+	{ MENUITEMTYPE_END },
+};
+
+static struct menudialogdef g_ExtendedNameBannerMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Name Banner",
+	g_ExtendedNameBannerMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
+// MOD: body awareness - the player's own body in first person
+static MenuItemHandlerResult menuhandlerBodyAwareness(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_GET:
+		return g_BodyViewEnabled[g_ExtMenuPlayer];
+	case MENUOP_SET:
+		g_BodyViewEnabled[g_ExtMenuPlayer] = data->checkbox.value ? 1 : 0;
+		break;
+	}
+
+	return 0;
+}
+
 static MenuItemHandlerResult menuhandlerUseKeyReloads(s32 operation, struct menuitem *item, union handlerdata *data)
 {
 	switch (operation) {
@@ -1927,6 +2107,22 @@ struct menuitem g_ExtendedGameMenuItems[] = {
 		(uintptr_t)"Use Key Reloads",
 		0,
 		menuhandlerUseKeyReloads,
+	},
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SELECTABLE_OPENSDIALOG,
+		(uintptr_t)"Name Banner\n", // MOD: name banner
+		0,
+		(void *)&g_ExtendedNameBannerMenuDialog,
+	},
+	{
+		MENUITEMTYPE_CHECKBOX,
+		0,
+		MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Body Awareness", // MOD: body awareness
+		0,
+		menuhandlerBodyAwareness,
 	},
 	{
 		MENUITEMTYPE_SEPARATOR,
@@ -2354,22 +2550,115 @@ static MenuItemHandlerResult menuhandlerRagdollPushScale(s32 operation, struct m
 	return 0;
 }
 
-static MenuItemHandlerResult menuhandlerRagdollMaxBodies(s32 operation, struct menuitem *item, union handlerdata *data)
+// MOD: combat simulator ragdolls - Max Bodies, solo/co-op and Combat
+// Simulator. Slider: 0 = Vanilla (setting -1), 1-245 = 12-256, 246 = Unlimited (0)
+#define RD_BODIESSLIDER_MAX (RD_MAXBODIES_LIMIT - RD_MINBODIES + 2)
+
+static s32 rdMaxBodiesToSlider(s32 setting)
+{
+	if (setting < 0) {
+		return 0;
+	}
+
+	if (setting == 0) {
+		return RD_BODIESSLIDER_MAX;
+	}
+
+	return (setting < RD_MINBODIES ? RD_MINBODIES : setting) - RD_MINBODIES + 1;
+}
+
+static s32 rdMaxBodiesFromSlider(s32 value)
+{
+	return value <= 0 ? -1 : value >= RD_BODIESSLIDER_MAX ? 0 : value + RD_MINBODIES - 1;
+}
+
+static MenuItemHandlerResult rdMaxBodiesHandler(s32 *setting, s32 operation, union handlerdata *data)
 {
 	switch (operation) {
 	case MENUOP_CHECKDISABLED:
 		return !g_RagdollsEnabled;
 	case MENUOP_GETSLIDER:
-		data->slider.value = g_RagdollMaxBodies;
+		data->slider.value = rdMaxBodiesToSlider(*setting);
 		break;
 	case MENUOP_SET:
-		g_RagdollMaxBodies = data->slider.value;
+		*setting = rdMaxBodiesFromSlider(data->slider.value);
 		break;
 	case MENUOP_GETSLIDERLABEL:
-		if (data->slider.value == 0) {
+		if (data->slider.value <= 0) {
+			sprintf(data->slider.label, "Vanilla");
+		} else if (data->slider.value >= RD_BODIESSLIDER_MAX) {
 			sprintf(data->slider.label, "Unlimited");
 		} else {
-			sprintf(data->slider.label, "%d", data->slider.value);
+			sprintf(data->slider.label, "%d", rdMaxBodiesFromSlider(data->slider.value));
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMaxBodies(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return rdMaxBodiesHandler(&g_RagdollMaxBodies, operation, data);
+}
+
+static MenuItemHandlerResult menuhandlerRagdollMpMaxBodies(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return rdMaxBodiesHandler(&g_RagdollMpMaxBodies, operation, data);
+}
+
+// MOD: combat simulator ragdolls - Resting Bodies Turn Solid
+static MenuItemHandlerResult menuhandlerRagdollMpSolid(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	static const char *opts[] = { "Combat Simulator", "Both", "Off" };
+	static const s32 values[] = { RD_SOLID_COMBATSIM, RD_SOLID_BOTH, RD_SOLID_OFF };
+	s32 i;
+
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETOPTIONCOUNT:
+		data->dropdown.value = ARRAYCOUNT(opts);
+		break;
+	case MENUOP_GETOPTIONTEXT:
+		return (intptr_t) opts[data->dropdown.value];
+	case MENUOP_SET:
+		g_RagdollMpSolid = values[data->dropdown.value];
+		break;
+	case MENUOP_GETSELECTEDINDEX:
+		data->dropdown.value = 0;
+
+		for (i = 0; i < ARRAYCOUNT(values); i++) {
+			if (values[i] == g_RagdollMpSolid) {
+				data->dropdown.value = i;
+			}
+		}
+		break;
+	}
+
+	return 0;
+}
+
+// MOD: combat simulator ragdolls - Max Active Bodies, solo/co-op and Combat
+// Simulator. Slider: 0-244 = 12-256, 245 = Unlimited (setting 0)
+#define RD_ACTIVESLIDER_MAX (RD_MAXBODIES_LIMIT - RD_MINACTIVE + 1)
+
+static MenuItemHandlerResult rdMaxActiveHandler(s32 *setting, s32 operation, union handlerdata *data)
+{
+	switch (operation) {
+	case MENUOP_CHECKDISABLED:
+		return !g_RagdollsEnabled;
+	case MENUOP_GETSLIDER:
+		data->slider.value = *setting <= 0 ? RD_ACTIVESLIDER_MAX : *setting < RD_MINACTIVE ? 0 : *setting - RD_MINACTIVE;
+		break;
+	case MENUOP_SET:
+		*setting = data->slider.value >= RD_ACTIVESLIDER_MAX ? 0 : data->slider.value + RD_MINACTIVE;
+		break;
+	case MENUOP_GETSLIDERLABEL:
+		if (data->slider.value >= RD_ACTIVESLIDER_MAX) {
+			sprintf(data->slider.label, "Unlimited");
+		} else {
+			sprintf(data->slider.label, "%d", data->slider.value + RD_MINACTIVE);
 		}
 		break;
 	}
@@ -2379,25 +2668,12 @@ static MenuItemHandlerResult menuhandlerRagdollMaxBodies(s32 operation, struct m
 
 static MenuItemHandlerResult menuhandlerRagdollMaxPhysical(s32 operation, struct menuitem *item, union handlerdata *data)
 {
-	switch (operation) {
-	case MENUOP_CHECKDISABLED:
-		return !g_RagdollsEnabled;
-	case MENUOP_GETSLIDER:
-		data->slider.value = g_RagdollMaxPhysical;
-		break;
-	case MENUOP_SET:
-		g_RagdollMaxPhysical = data->slider.value;
-		break;
-	case MENUOP_GETSLIDERLABEL:
-		if (data->slider.value == 0) {
-			sprintf(data->slider.label, "Unlimited");
-		} else {
-			sprintf(data->slider.label, "%d", data->slider.value);
-		}
-		break;
-	}
+	return rdMaxActiveHandler(&g_RagdollMaxPhysical, operation, data);
+}
 
-	return 0;
+static MenuItemHandlerResult menuhandlerRagdollMpMaxPhysical(s32 operation, struct menuitem *item, union handlerdata *data)
+{
+	return rdMaxActiveHandler(&g_RagdollMpMaxPhysical, operation, data);
 }
 
 static MenuItemHandlerResult menuhandlerRagdollChrPush(s32 operation, struct menuitem *item, union handlerdata *data)
@@ -2883,6 +3159,7 @@ struct menuitem g_ExtendedInteractionMenuItems[] = {
 	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Held Bodies Stop Bullets", 0, menuhandlerRagdollBodyCover },
 	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Guards React to Bodies", 0, menuhandlerRagdollBodyAlerts },
 	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Push Strength", 1000, menuhandlerRagdollPushScale },
 	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Grab Strength", 375, menuhandlerRagdollGrabStrength },
 	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
 	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
@@ -2967,17 +3244,43 @@ static MenuItemHandlerResult menuhandlerRagdollPreset(s32 operation, struct menu
 	return 0;
 }
 
+// MOD: menu layout - Extended > Physics > Performance
+struct menuitem g_ExtendedPhysicsPerformanceMenuItems[] = {
+	// MOD: combat simulator ragdolls - separate limits for solo/co-op and the Combat Simulator
+	{ MENUITEMTYPE_LABEL, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_LABEL_ALTCOLOUR, (uintptr_t)"Singleplayer / Co-Op\n", 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Bodies", RD_BODIESSLIDER_MAX, menuhandlerRagdollMaxBodies },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Active Bodies", RD_ACTIVESLIDER_MAX, menuhandlerRagdollMaxPhysical },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_LABEL, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_LABEL_ALTCOLOUR, (uintptr_t)"Combat Simulator\n", 0, NULL },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Bodies", RD_BODIESSLIDER_MAX, menuhandlerRagdollMpMaxBodies },
+	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Active Bodies", RD_ACTIVESLIDER_MAX, menuhandlerRagdollMpMaxPhysical },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_DROPDOWN, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Resting Bodies Turn Solid", 0, menuhandlerRagdollMpSolid },
+	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
+	{ MENUITEMTYPE_END },
+};
+
+struct menudialogdef g_ExtendedPhysicsPerformanceMenuDialog = {
+	MENUDIALOGTYPE_DEFAULT,
+	(uintptr_t)"Physics Performance",
+	g_ExtendedPhysicsPerformanceMenuItems,
+	NULL,
+	MENUDIALOGFLAG_LITERAL_TEXT,
+	NULL,
+};
+
 struct menuitem g_ExtendedPhysicsMenuItems[] = {
 	{ MENUITEMTYPE_DROPDOWN, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Preset", 0, menuhandlerRagdollPreset },
-	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
 	{ MENUITEMTYPE_CHECKBOX, 0, MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdolls", 0, menuhandlerRagdolls },
-	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Push Strength", 1000, menuhandlerRagdollPushScale },
-	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Bodies", RD_MAXBODIES_LIMIT, menuhandlerRagdollMaxBodies },
-	{ MENUITEMTYPE_SLIDER, 0, MENUITEMFLAG_LITERAL_TEXT | MENUITEMFLAG_SLIDER_WIDE, (uintptr_t)"Max Simulated Bodies", RD_MAXBODIES_LIMIT, menuhandlerRagdollMaxPhysical },
 	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
 	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdoll Behaviours...\n", 0, (void *)&g_ExtendedBehaviourMenuDialog },
 	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Ragdoll Interactions...\n", 0, (void *)&g_ExtendedInteractionMenuDialog },
+#ifdef PD_GRAVITY
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Gravity...\n", 0, (void *)&g_GravityMenuDialog }, // MOD: gravity
+#endif
 	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
+	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Performance...\n", 0, (void *)&g_ExtendedPhysicsPerformanceMenuDialog },
 	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT, (uintptr_t)"Debug...\n", 0, (void *)&g_ExtendedPhysicsDebugMenuDialog },
 	{ MENUITEMTYPE_SEPARATOR, 0, 0, 0, 0, NULL },
 	{ MENUITEMTYPE_SELECTABLE, 0, MENUITEMFLAG_SELECTABLE_CLOSESDIALOG, L_OPTIONS_213, 0, NULL }, // "Back"
@@ -3051,6 +3354,15 @@ struct menuitem g_ExtendedMenuItems[] = {
 		(uintptr_t)"Physics\n",
 		0,
 		(void *)&g_ExtendedPhysicsMenuDialog, // MOD: ragdoll physics
+	},
+#elif defined(PD_GRAVITY)
+	{
+		MENUITEMTYPE_SELECTABLE,
+		0,
+		MENUITEMFLAG_SELECTABLE_OPENSDIALOG | MENUITEMFLAG_LITERAL_TEXT,
+		(uintptr_t)"Gravity\n",
+		0,
+		(void *)&g_GravityMenuDialog, // MOD: gravity (in Physics when that's built)
 	},
 #endif
 	{

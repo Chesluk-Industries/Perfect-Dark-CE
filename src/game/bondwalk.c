@@ -29,6 +29,9 @@
 #include "lib/collision.h"
 #include "data.h"
 #include "types.h"
+#ifdef PD_GRAVITY
+#include "gravity.h" // MOD: gravity
+#endif
 #ifndef PLATFORM_N64
 extern f32 fabsf(f32);
 #endif
@@ -1021,6 +1024,10 @@ void bwalkUpdateVertical(void)
 			multiplier = 0.277777777f;
 		}
 
+#ifdef PD_GRAVITY
+		multiplier *= gravityPlayerScale(); // MOD: gravity
+#endif
+
 		newfallspeed = fallspeed - g_Vars.lvupdate60freal * multiplier;
 		newmanground += g_Vars.lvupdate60freal * (fallspeed + newfallspeed) * 0.5f;
 		fallspeed = newfallspeed;
@@ -1029,9 +1036,15 @@ void bwalkUpdateVertical(void)
 			newfallspeed = g_Vars.currentplayer->vv_manground - g_Vars.currentplayer->vv_ground;
 			newmanground = g_Vars.currentplayer->vv_ground;
 
+#ifdef PD_GRAVITY
+			fallspeed = sqrtf(g_Vars.currentplayer->bdeltapos.y *
+					g_Vars.currentplayer->bdeltapos.y +
+					(((newfallspeed + newfallspeed) * 0.277777777f * gravityPlayerScale()) / 60.0f) * 60.0f); // MOD: gravity
+#else
 			fallspeed = sqrtf(g_Vars.currentplayer->bdeltapos.y *
 					g_Vars.currentplayer->bdeltapos.y +
 					(((newfallspeed + newfallspeed) * 0.277777777f) / 60.0f) * 60.0f);
+#endif
 			fallspeed = -fallspeed;
 		}
 
@@ -1045,7 +1058,16 @@ void bwalkUpdateVertical(void)
 				g_Vars.currentplayer->isfalling = true;
 				g_Vars.currentplayer->fallstart = g_Vars.lvframe60;
 			} else {
+#ifdef PD_GRAVITY
+				// MOD: gravity - the same drop takes longer at low gravity
+				// (1 / sqrt of the scale)
+				f32 gscale = gravityPlayerScale();
+				s32 falllimit = gscale < 1.0f ? (s32) (TICKS(240) / sqrtf(gscale)) : TICKS(240);
+
+				if (g_Vars.lvframe60 - g_Vars.currentplayer->fallstart > falllimit) {
+#else
 				if (g_Vars.lvframe60 - g_Vars.currentplayer->fallstart > TICKS(240)) {
+#endif
 					// Have been falling for 4 seconds
 					playerDie(true);
 				}
