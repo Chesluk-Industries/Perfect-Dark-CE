@@ -498,9 +498,10 @@ void patchInit(void)
 	 * Current patches include:
 	 *     1. Adjusting lights in Defection level helipad to obtain correct brightness
 	 *        and fixing a broken light by the DataDyne statue on the bottom floor
-	 *     2. Adjusting lights in Investigation level to restore missing lights
-	 *     3. Adjusting lights in Villa level to restore missing lights
-	 *     4. Removing repeated dialog in Infiltration outro
+	 *     2. Adjusting lights in Air Base level along the diagonal lift
+	 *     3. Adjusting lights in Investigation level to restore missing lights
+	 *     4. Adjusting lights in Villa level to restore missing lights
+	 *     5. Removing repeated dialog in Infiltration outro
 	 */
 	if (fsGetModDir()) {
 		sysLogPrintf(LOG_NOTE, "skipping auto patches because --moddir is set");
