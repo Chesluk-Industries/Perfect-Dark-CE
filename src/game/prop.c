@@ -1009,7 +1009,6 @@ bool shotTestLos(struct coord *gunpos2d, struct coord *gundir2d, struct coord *g
 	struct prop *prop;
 	s16 texturenum;
 	u32 surfacetype;
-	s16 grateddoor; // MOD: grated door glares - by joshuarwood (perfect_dark PR #735)
 	f32 maxdistance;
 
 	shotdata.gunpos3d.x = gunpos3d->x;
@@ -1093,11 +1092,10 @@ bool shotTestLos(struct coord *gunpos2d, struct coord *gundir2d, struct coord *g
 			if (shotdata.hits[0].prop) {
 				texturenum = (prop->type == PROPTYPE_CHR || prop->type == PROPTYPE_PLAYER) ? -1 : shotdata.hits[0].hitthing.texturenum;
 				surfacetype = (texturenum >= 0 && texturenum < NUM_TEXTURES) ? g_Textures[texturenum].surfacetype : SURFACETYPE_DEFAULT;
-				// MOD: grated door glares - by joshuarwood (perfect_dark PR #735)
-				grateddoor = (shotdata.hits[0].model->obj->modelnum == MODEL_DD_WINDDOOR) && (surfacetype == SURFACETYPE_DEFAULT);
-				// ignore some glass parts and shields
-				if (shotdata.hits[0].slowsbullet && texturenum != 10000 &&
-				    surfacetype != SURFACETYPE_GLASS && surfacetype != SURFACETYPE_GLASSXLU && !grateddoor) {
+				// MOD: grated door and diagonal lift glares - by joshuarwood (perfect_dark PR #735)
+				// ignore some glass parts, metal gratings, and shields
+				if (shotdata.hits[0].slowsbullet && texturenum != 10000 && texturenum != 0x61 && texturenum != 0x654 &&
+				    surfacetype != SURFACETYPE_GLASS && surfacetype != SURFACETYPE_GLASSXLU) {
 					return false;
 				}
 				shotdata.hits[0].prop = NULL;
