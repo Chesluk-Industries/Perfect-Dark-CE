@@ -520,6 +520,7 @@ void patchInit(void)
 	if (fsFileSize(PATCH_CONFIG) < 0) {
 		FILE *f = fsFileOpenWrite(PATCH_CONFIG);
 		fprintf(f, "stage 0x22 { bgfile bgdata/bg_ame.seg }\n");
+		fprintf(f, "stage 0x27 { bgfile bgdata/bg_cave.seg }\n");
 		fprintf(f, "stage 0x2C { bgfile bgdata/bg_eld.seg }\n");
 		fprintf(f, "stage 0x2F { setupfile UsetuplueZ }\n");
 		fprintf(f, "stage 0x30 { bgfile bgdata/bg_ame.seg }\n");
@@ -541,6 +542,29 @@ void patchInit(void)
 		{ 1, 18,  0, 254,  0, 1 }, // light to left of datadyne statue on bottom floor (direction patch)
 	};
 	patchBgFile("bgdata/bg_ame.seg", 4, ame, NULL);
+	struct patchlights cave[] = {
+		{ 0,  4,  0, -1,  0, 4 }, // 12th yellow light from base of diagonal elevator
+		{ 0,  5,  0, -1,  0, 4 }, // 11th yellow light from base of diagonal elevator
+		{ 0,  6,  0, -1,  0, 4 }, // 10th yellow light from base of diagonal elevator
+		{ 0,  7,  0, -1,  0, 4 }, //  9th yellow light from base of diagonal elevator
+		{ 0,  8,  0, -1,  0, 4 }, //  8th yellow light from base of diagonal elevator
+		{ 0,  9,  0, -1,  0, 4 }, //  7th yellow light from base of diagonal elevator
+		{ 0, 10,  0, -1,  0, 4 }, //  6th yellow light from base of diagonal elevator
+		{ 0, 11,  0, -1,  0, 4 }, //  5th yellow light from base of diagonal elevator
+		{ 0, 12,  0, -1,  0, 4 }, //  4th yellow light from base of diagonal elevator
+		{ 0, 13,  0, -1,  0, 4 }, //  3rd yellow light from base of diagonal elevator
+		{ 0, 14,  0, -1,  0, 4 }, //  2nd yellow light from base of diagonal elevator
+		{ 0, 15,  0, -1,  0, 4 }, //  1st yellow light at bottom of diagonal evelator
+		{ 0, 45,  0, -1,  0, 4 }, // 20th yellow light at top of diagonal elevator
+		{ 0, 46,  0, -1,  0, 4 }, // 19th yellow light from base of diagonal elevator
+		{ 0, 47,  0, -1,  0, 4 }, // 18th yellow light from base of diagonal elevator
+		{ 0, 48,  0, -1,  0, 4 }, // 17th yellow light from base of diagonal elevator
+		{ 0, 49,  0, -1,  0, 4 }, // 14th yellow light from base of diagonal elevator
+		{ 0, 50,  0, -1,  0, 4 }, // 15th yellow light from base of diagonal elevator
+		{ 0, 51,  0, -1,  0, 4 }, // 16th yellow light from base of diagonal elevator
+		{ 0, 52,  0, -1,  0, 4 }, // 13th yellow light from base of diagonal elevator
+	};
+	patchBgFile("bgdata/bg_cave.seg", 20, cave, NULL);
 	struct patchlights eld[] = {
 		{ 0, 20, -1,  0,  0, 4 }, // last pair of lights in tunnel near villa
 		{ 0, 21, -1,  0,  0, 4 }, // last pair of lights in tunnel near villa
